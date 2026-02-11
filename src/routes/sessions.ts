@@ -1,0 +1,343 @@
+import { Router, Response } from 'express';
+import multer from 'multer';
+import { ServiceContainer } from '../container';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { enforceDataIsolation } from '../middleware/security';
+import { aiProcessingRateLimit, uploadRateLimit } from '../middleware/rateLimiting';
+import { validateRequest, validationSchemas } from '../middleware/validation';
+import { AudioSessionError } from '../services/AudioSessionService';
+import { config } from '../utils/config';
+
+/**
+ * Audio Session Routes
+ * Requirements: 3.1, 3.2, 5.3
+ */
+
+export function createSessionRoutes(services: ServiceContainer): Router {
+  const router = Router();
+  const { audioSessionService } = services;
+
+// Configure multer for audio file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: config.MAX_FILE_SIZE, // Use config for file size limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept audio files
+    if (file.mimetype.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only audio files are allowed'));
+    }
+  }
+});
+
+/**
+ * Start a new audio session
+ * POST /api/sessions/start
+ * Requirements: 3.1, 6.2, 6.3
+ */
+router.post('/start', authenticate, aiProcessingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+
+    // Create new session (includes usage limit validation)
+    const session = await audioSessionService.startSession(userId);
+
+    res.status(201).json({
+      success: true,
+      data: {
+        sessionId: session.id,
+        status: session.status,
+        createdAt: session.createdAt
+      }
+    });
+    return;
+  } catch (error) {
+    if (error instanceof AudioSessionError) {
+      let statusCode = 400;
+      
+      // Handle specific error codes
+      if (error.code === 'USER_NOT_FOUND') {
+        statusCode = 404;
+      } else if (error.code === 'USAGE_LIMIT_EXCEEDED') {
+        statusCode = 429;
+      }
+      
+      return res.status(statusCode).json({
+        error: {
+          code: error.code,
+          message: error.message
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    console.error('Session creation error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to create session'
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    });
+    return;
+  }
+});
+
+/**
+ * Upload audio file to session
+ * POST /api/sessions/:id/audio
+ * Requirements: 3.2
+ */
+router.post('/:id/audio', 
+  authenticate, 
+  enforceDataIsolation('session'), 
+  validateRequest(validationSchemas.sessions.sessionId),
+  uploadRateLimit, 
+  upload.single('audio'), 
+  async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = req.params.id;
+    const userId = req.user!.id;
+    const audioFile = req.file;
+
+    if (!audioFile) {
+      return res.status(400).json({
+        error: {
+          code: 'MISSING_AUDIO_FILE',
+          message: 'Audio file is required'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    // Verify session belongs to user
+    const session = await audioSessionService.getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    if (session.userId !== userId) {
+      return res.status(403).json({
+        error: {
+          code: 'SESSION_ACCESS_DENIED',
+          message: 'You do not have access to this session'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    // Upload audio and start processing
+    await audioSessionService.uploadAudio(sessionId, audioFile.buffer, audioFile.originalname);
+
+    res.status(200).json({
+      success: true,
+      message: 'Audio uploaded successfully. Processing started.',
+      data: {
+        sessionId,
+        status: 'processing'
+      }
+    });
+    return;
+  } catch (error) {
+    if (error instanceof AudioSessionError) {
+      const statusCode = error.code === 'SESSION_NOT_FOUND' ? 404 : 
+                        error.code === 'INVALID_SESSION_STATE' ? 409 : 400;
+      return res.status(statusCode).json({
+        error: {
+          code: error.code,
+          message: error.message
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    console.error('Audio upload error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to upload audio'
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    });
+    return;
+  }
+});
+
+/**
+ * Get user's session history
+ * GET /api/sessions/history
+ * Requirements: 5.3
+ */
+router.get('/history', 
+  authenticate, 
+  enforceDataIsolation('session'), 
+  validateRequest(validationSchemas.sessions.history),
+  async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    if (limit < 1 || limit > 100) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_LIMIT',
+          message: 'Limit must be between 1 and 100'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    const sessions = await audioSessionService.getSessionHistory(userId, limit);
+
+    const formattedSessions = sessions.map(session => ({
+      id: session.id,
+      status: session.status,
+      scores: {
+        clarity: session.clarityScore,
+        confidence: session.confidenceScore,
+        tone: session.toneScore,
+        enthusiasm: session.enthusiasmScore,
+        specificity: session.specificityScore
+      },
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        sessions: formattedSessions,
+        total: sessions.length
+      }
+    });
+    return;
+  } catch (error) {
+    if (error instanceof AudioSessionError) {
+      return res.status(400).json({
+        error: {
+          code: error.code,
+          message: error.message
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    console.error('Session history error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to retrieve session history'
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    });
+    return;
+  }
+});
+
+/**
+ * Get session details
+ * GET /api/sessions/:id
+ * Requirements: 3.1
+ */
+router.get('/:id', 
+  authenticate, 
+  enforceDataIsolation('session'), 
+  validateRequest(validationSchemas.sessions.sessionId),
+  async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = req.params.id;
+    const userId = req.user!.id;
+
+    const session = await audioSessionService.getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    // Verify session belongs to user
+    if (session.userId !== userId) {
+      return res.status(403).json({
+        error: {
+          code: 'SESSION_ACCESS_DENIED',
+          message: 'You do not have access to this session'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        id: session.id,
+        status: session.status,
+        transcript: session.transcript,
+        aiAnalysis: session.aiAnalysis,
+        scores: {
+          clarity: session.clarityScore,
+          confidence: session.confidenceScore,
+          tone: session.toneScore,
+          enthusiasm: session.enthusiasmScore,
+          specificity: session.specificityScore
+        },
+        analysisComplete: session.analysisComplete,
+        processingError: session.processingError,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt
+      }
+    });
+    return;
+  } catch (error) {
+    if (error instanceof AudioSessionError) {
+      return res.status(400).json({
+        error: {
+          code: error.code,
+          message: error.message
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    console.error('Session retrieval error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to retrieve session'
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    });
+    return;
+  }
+});
+
+  return router;
+}
+
+export default createSessionRoutes;

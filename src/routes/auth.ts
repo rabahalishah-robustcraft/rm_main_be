@@ -1,0 +1,176 @@
+import { Router, Request, Response } from 'express';
+import { ServiceContainer } from '../container';
+import { authenticate } from '../middleware/auth';
+import { authRateLimit } from '../middleware/rateLimiting';
+import { asyncHandler } from '../middleware/error';
+import { validateRequest, validationSchemas } from '../middleware/validation';
+import { User, SubscriptionTier } from '../types/auth';
+
+// Define request/response types locally
+interface AuthenticatedRequest extends Request {
+  user?: User;
+}
+
+interface RegisterRequest {
+  email: string;
+  password: string;
+}
+
+interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+interface RefreshRequest {
+  refreshToken: string;
+}
+
+interface AuthResponse {
+  user: User;
+  token: string;
+}
+
+export function createAuthRoutes(services: ServiceContainer): Router {
+  const router = Router();
+  const { authService } = services;
+
+  /**
+   * Register a new user
+   * POST /api/auth/register
+   * Requirements: 1.1, 9.1
+   */
+  router.post('/register', 
+    authRateLimit, // Apply rate limiting
+    validateRequest(validationSchemas.auth.register),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { email, password }: RegisterRequest = req.body;
+
+      const result = await authService.register(email, password);
+      
+      res.status(201).json({
+        success: true,
+        message: 'User registered successfully',
+        user: result.user,
+        token: result.token
+      });
+    })
+  );
+
+  /**
+   * Login user
+   * POST /api/auth/login
+   * Requirements: 1.2, 9.2
+   */
+  router.post('/login',
+    authRateLimit, // Apply rate limiting
+    validateRequest(validationSchemas.auth.login),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { email, password }: LoginRequest = req.body;
+
+      const result = await authService.login(email, password);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        user: result.user,
+        token: result.token
+      });
+    })
+  );
+
+  /**
+   * Logout user
+   * POST /api/auth/logout
+   * Requirements: 1.4
+   */
+  router.post('/logout',
+    authenticate,
+    asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      
+      if (!token) {
+        res.status(400).json({
+          error: {
+            code: 'MISSING_TOKEN',
+            message: 'Authorization token is required'
+          },
+          timestamp: new Date().toISOString(),
+          path: req.path
+        });
+        return;
+      }
+
+      await authService.logout(token);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Logout successful'
+      });
+    })
+  );
+
+  /**
+   * Get current user information
+   * GET /api/auth/me
+   * Requirements: 1.3
+   */
+  router.get('/me',
+    authenticate,
+    asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+      const user = req.user!;
+      
+      res.status(200).json({
+        id: user.id,
+        email: user.email,
+        subscriptionTier: user.subscriptionTier,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      });
+    })
+  );
+
+  /**
+   * Refresh JWT token
+   * POST /api/auth/refresh
+   * Requirements: 9.2
+   */
+  router.post('/refresh',
+    authRateLimit, // Apply rate limiting
+    validateRequest(validationSchemas.auth.refresh),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { refreshToken }: RefreshRequest = req.body;
+
+      const newToken = await authService.refreshToken(refreshToken);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Token refreshed successfully',
+        token: newToken
+      });
+    })
+  );
+
+  /**
+   * Validate JWT token
+   * GET /api/auth/validate
+   * Requirements: 1.3, 9.2
+   */
+  router.get('/validate',
+    authenticate,
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      res.status(200).json({
+        success: true,
+        message: 'Token is valid',
+        user: {
+          id: req.user!.id,
+          email: req.user!.email,
+          subscriptionTier: req.user!.subscriptionTier
+        }
+      });
+    })
+  );
+
+  return router;
+}
+
+export default createAuthRoutes;
