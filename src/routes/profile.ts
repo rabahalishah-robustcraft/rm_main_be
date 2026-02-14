@@ -64,6 +64,35 @@ router.put('/',
 });
 
 /**
+ * POST /api/profile/manual-entry
+ * Manually enter profile information (alternative to resume upload)
+ * Requirements: Figma design workflow
+ */
+router.post('/manual-entry',
+  validateRequest(validationSchemas.profile.update),
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.id;
+    const profileData: ProfileUpdateData = req.body;
+    
+    // Validate required fields for manual entry
+    if (!profileData.fullName) {
+      throw new ValidationError('Full name is required for manual entry');
+    }
+    
+    const updatedProfile = await profileService.updateProfile(userId, profileData);
+    
+    res.json({
+      success: true,
+      data: updatedProfile,
+      message: 'Profile information saved successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * POST /api/profile/resume
  * Upload resume file
  * Requirements: 2.1, 7.1, 7.2

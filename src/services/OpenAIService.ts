@@ -48,6 +48,12 @@ export interface ResumeData {
   industries: string[];
   jobTitles: string[];
   summary: string;
+  fullName?: string;
+  currentJobTitle?: string;
+  currentCompany?: string;
+  school?: string;
+  degreeInfo?: string;
+  previousJobTitles?: string[];
 }
 
 /**
@@ -612,6 +618,12 @@ RESUME TEXT: "${resumeText}"
 
 Please provide the extracted information in this exact JSON format:
 {
+  "fullName": "Full name of the candidate",
+  "currentJobTitle": "Current or most recent job title",
+  "currentCompany": "Current or most recent company",
+  "school": "Most recent or highest level educational institution",
+  "degreeInfo": "Degree information (e.g., Bachelor of Science in Computer Science)",
+  "previousJobTitles": ["Previous job title 1", "Previous job title 2"],
   "skills": ["skill1", "skill2", "skill3"],
   "experienceLevel": "Entry|Mid|Senior|Executive",
   "industries": ["industry1", "industry2"],
@@ -619,7 +631,13 @@ Please provide the extracted information in this exact JSON format:
   "summary": "Brief professional summary"
 }
 
-Focus on technical skills, relevant experience, and career progression.
+Focus on extracting:
+- Full name from the top of the resume
+- Current job title and company
+- Educational background (school and degree)
+- Previous job titles (optional, if available)
+- Technical skills and relevant experience
+- Career progression and experience level
 `;
   }
 
@@ -686,6 +704,12 @@ Focus on technical skills, relevant experience, and career progression.
       const parsed = JSON.parse(jsonMatch[0]);
       
       return {
+        fullName: parsed.fullName || undefined,
+        currentJobTitle: parsed.currentJobTitle || undefined,
+        currentCompany: parsed.currentCompany || undefined,
+        school: parsed.school || undefined,
+        degreeInfo: parsed.degreeInfo || undefined,
+        previousJobTitles: Array.isArray(parsed.previousJobTitles) ? parsed.previousJobTitles : undefined,
         skills: Array.isArray(parsed.skills) ? parsed.skills : [],
         experienceLevel: parsed.experienceLevel || 'Mid',
         industries: Array.isArray(parsed.industries) ? parsed.industries : [],

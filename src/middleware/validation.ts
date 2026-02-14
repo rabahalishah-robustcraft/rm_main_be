@@ -106,9 +106,15 @@ export const validationSchemas = {
   profile: {
     update: {
       body: Joi.object({
-        targetIndustry: Joi.string().optional(),
-        targetJobTitle: Joi.string().optional(),
-        experienceLevel: Joi.string().max(50).optional() // Open field - any experience level
+        fullName: Joi.string().max(100).trim().optional(),
+        currentJobTitle: Joi.string().max(100).trim().optional(),
+        currentCompany: Joi.string().max(100).trim().optional(),
+        school: Joi.string().max(200).trim().optional(),
+        degreeInfo: Joi.string().max(200).trim().optional(),
+        previousJobTitles: Joi.array().items(Joi.string().max(100).trim()).optional(),
+        targetIndustry: Joi.string().max(100).trim().optional(),
+        targetJobTitle: Joi.string().max(100).trim().optional(),
+        experienceLevel: Joi.string().max(50).trim().optional()
       }).min(1)
     },
     targetRole: {

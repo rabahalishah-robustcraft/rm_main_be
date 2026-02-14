@@ -101,17 +101,39 @@ export class ExternalServiceError extends AppError {
 export interface UserProfile {
   id: string;
   userId: string;
+  
+  // Profile Information (from Figma design)
+  fullName?: string;
+  currentJobTitle?: string;
+  currentCompany?: string;
+  school?: string;
+  degreeInfo?: string;
+  previousJobTitles?: string[];
+  
+  // Resume and Skills
   resumeS3Key?: string;
-  targetIndustry?: string;
-  targetJobTitle?: string;
-  aiAttributes: Record<string, any>;
   extractedSkills: string[];
   experienceLevel?: string;
+  
+  // Target Role
+  targetIndustry?: string;
+  targetJobTitle?: string;
+  
+  // AI Attributes
+  aiAttributes: Record<string, any>;
+  
+  // Timestamps
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface ProfileUpdateData {
+  fullName?: string;
+  currentJobTitle?: string;
+  currentCompany?: string;
+  school?: string;
+  degreeInfo?: string;
+  previousJobTitles?: string[];
   targetIndustry?: string;
   targetJobTitle?: string;
   experienceLevel?: string;
@@ -121,17 +143,39 @@ export interface ProfileUpdateData {
 export interface DatabaseUserProfile {
   id: string;
   userId: string;
+  
+  // Profile Information
+  fullName: string | null;
+  currentJobTitle: string | null;
+  currentCompany: string | null;
+  school: string | null;
+  degreeInfo: string | null;
+  previousJobTitles: string[];
+  
+  // Resume and Skills
   resumeS3Key: string | null;
-  targetIndustry: string | null;
-  targetJobTitle: string | null;
-  aiAttributes: any; // JSON type from Prisma
   extractedSkills: string[];
   experienceLevel: string | null;
+  
+  // Target Role
+  targetIndustry: string | null;
+  targetJobTitle: string | null;
+  
+  // AI Attributes
+  aiAttributes: any; // JSON type from Prisma
+  
+  // Timestamps
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface UpdateProfileData {
+  fullName?: string;
+  currentJobTitle?: string;
+  currentCompany?: string;
+  school?: string;
+  degreeInfo?: string;
+  previousJobTitles?: string[];
   resumeS3Key?: string;
   targetIndustry?: string;
   targetJobTitle?: string;

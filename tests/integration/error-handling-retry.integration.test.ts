@@ -396,6 +396,12 @@ describe('Error Handling and Retry Logic Integration Tests', () => {
         profile: {
           id: 'test-user',
           userId: 'test-user',
+              fullName: null,
+              currentJobTitle: null,
+              currentCompany: null,
+              school: null,
+              degreeInfo: null,
+              previousJobTitles: [],
           targetIndustry: 'Technology',
           targetJobTitle: 'Software Engineer',
           experienceLevel: 'mid',

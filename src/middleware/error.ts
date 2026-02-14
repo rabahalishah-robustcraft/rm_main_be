@@ -43,6 +43,36 @@ export const errorHandler = (
   // Log error for debugging (exclude sensitive information)
   logError(error, req);
 
+  // Handle authentication errors first (check by name since they might be from different modules)
+  if (error.name === 'AuthenticationError') {
+    const errorResponse: ErrorResponse = {
+      error: {
+        code: ErrorCode.AUTHENTICATION_ERROR,
+        message: error.message || 'Authentication failed',
+        details: (error as any).details
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    };
+    res.status(401).json(errorResponse);
+    return;
+  }
+
+  // Handle authorization errors
+  if (error.name === 'AuthorizationError') {
+    const errorResponse: ErrorResponse = {
+      error: {
+        code: ErrorCode.AUTHORIZATION_ERROR,
+        message: error.message || 'Insufficient permissions',
+        details: (error as any).details
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    };
+    res.status(403).json(errorResponse);
+    return;
+  }
+
   // Handle different error types
   if (error instanceof AppError) {
     handleAppError(error, req, res);

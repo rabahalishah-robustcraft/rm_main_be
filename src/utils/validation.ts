@@ -96,9 +96,15 @@ export const authSchemas = {
 
 export const profileSchemas = {
   updateProfile: Joi.object({
+    fullName: Joi.string().max(100).trim().optional(),
+    currentJobTitle: Joi.string().max(100).trim().optional(),
+    currentCompany: Joi.string().max(100).trim().optional(),
+    school: Joi.string().max(200).trim().optional(),
+    degreeInfo: Joi.string().max(200).trim().optional(),
+    previousJobTitles: Joi.array().items(Joi.string().max(100).trim()).optional(),
     targetIndustry: Joi.string().max(100).trim().optional(),
     targetJobTitle: Joi.string().max(100).trim().optional(),
-    experienceLevel: Joi.string().max(50).trim().optional() // Open field - any experience level
+    experienceLevel: Joi.string().max(50).trim().optional()
   }).min(1).messages({
     'object.min': 'At least one field must be provided for update'
   }),

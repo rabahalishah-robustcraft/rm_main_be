@@ -99,6 +99,30 @@ export class ProfileService implements IProfileService {
       // Prepare update data
       const updateData: UpdateProfileData = {};
       
+      if (validatedData.fullName !== undefined) {
+        updateData.fullName = validatedData.fullName;
+      }
+      
+      if (validatedData.currentJobTitle !== undefined) {
+        updateData.currentJobTitle = validatedData.currentJobTitle;
+      }
+      
+      if (validatedData.currentCompany !== undefined) {
+        updateData.currentCompany = validatedData.currentCompany;
+      }
+      
+      if (validatedData.school !== undefined) {
+        updateData.school = validatedData.school;
+      }
+      
+      if (validatedData.degreeInfo !== undefined) {
+        updateData.degreeInfo = validatedData.degreeInfo;
+      }
+      
+      if (validatedData.previousJobTitles !== undefined) {
+        updateData.previousJobTitles = validatedData.previousJobTitles;
+      }
+      
       if (validatedData.targetIndustry !== undefined) {
         updateData.targetIndustry = validatedData.targetIndustry;
       }
@@ -201,11 +225,14 @@ export class ProfileService implements IProfileService {
         }
       }
 
-      // Process resume with extracted text (asynchronously)
+      // Process resume with extracted text (synchronously to ensure skills are updated)
       // This updates the profile with skills and experience level
-      this.processResumeFromText(userId, extractedText).catch(error => {
+      try {
+        await this.processResumeFromText(userId, extractedText);
+      } catch (error) {
         console.error(`Failed to process resume for user ${userId}:`, error);
-      });
+        // Don't fail the upload if processing fails, but log the error
+      }
 
       // Update profile with resume S3 key
       await this.prisma.userProfile.update({
@@ -271,14 +298,37 @@ export class ProfileService implements IProfileService {
         resumeData = this.extractResumeDataWithKeywords(extractedText);
       }
 
-      // Update profile with extracted skills and experience level
+      // Prepare update data with extracted information
+      const updateData: UpdateProfileData = {
+        extractedSkills: resumeData.skills,
+        experienceLevel: resumeData.experienceLevel
+      };
+
+      // Add profile fields if extracted
+      if (resumeData.fullName) {
+        updateData.fullName = resumeData.fullName;
+      }
+      if (resumeData.currentJobTitle) {
+        updateData.currentJobTitle = resumeData.currentJobTitle;
+      }
+      if (resumeData.currentCompany) {
+        updateData.currentCompany = resumeData.currentCompany;
+      }
+      if (resumeData.school) {
+        updateData.school = resumeData.school;
+      }
+      if (resumeData.degreeInfo) {
+        updateData.degreeInfo = resumeData.degreeInfo;
+      }
+      if (resumeData.previousJobTitles && resumeData.previousJobTitles.length > 0) {
+        updateData.previousJobTitles = resumeData.previousJobTitles;
+      }
+
+      // Update profile with extracted data
       // Requirement 4.4: Update profile with extracted data
       await this.prisma.userProfile.update({
         where: { userId },
-        data: {
-          extractedSkills: resumeData.skills,
-          experienceLevel: resumeData.experienceLevel
-        }
+        data: updateData
       });
     } catch (error) {
       if (error instanceof ValidationError || error instanceof NotFoundError) {
@@ -707,11 +757,32 @@ export class ProfileService implements IProfileService {
       userId: dbProfile.userId,
       aiAttributes: dbProfile.aiAttributes as Record<string, any>,
       extractedSkills: dbProfile.extractedSkills,
+      previousJobTitles: dbProfile.previousJobTitles,
       createdAt: dbProfile.createdAt,
       updatedAt: dbProfile.updatedAt
     };
 
     // Only add optional properties if they have values
+    if (dbProfile.fullName) {
+      profile.fullName = dbProfile.fullName;
+    }
+    
+    if (dbProfile.currentJobTitle) {
+      profile.currentJobTitle = dbProfile.currentJobTitle;
+    }
+    
+    if (dbProfile.currentCompany) {
+      profile.currentCompany = dbProfile.currentCompany;
+    }
+    
+    if (dbProfile.school) {
+      profile.school = dbProfile.school;
+    }
+    
+    if (dbProfile.degreeInfo) {
+      profile.degreeInfo = dbProfile.degreeInfo;
+    }
+    
     if (dbProfile.resumeS3Key) {
       profile.resumeS3Key = dbProfile.resumeS3Key;
     }
