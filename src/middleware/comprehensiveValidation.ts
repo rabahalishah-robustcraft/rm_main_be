@@ -356,8 +356,8 @@ export const endpointValidation = {
   sessions: {
     sessionId: createComprehensiveValidation({
       params: Joi.object({
-        id: Joi.string().uuid().required().messages({
-          'string.uuid': 'Session ID must be a valid UUID',
+        id: Joi.string().pattern(/^c[a-z0-9]{24}$/).required().messages({
+          'string.pattern.base': 'Session ID must be a valid CUID',
           'any.required': 'Session ID is required'
         })
       })
@@ -372,7 +372,10 @@ export const endpointValidation = {
 
     audioUpload: createComprehensiveValidation({
       params: Joi.object({
-        id: Joi.string().uuid().required()
+        id: Joi.string().pattern(/^c[a-z0-9]{24}$/).required().messages({
+          'string.pattern.base': 'Session ID must be a valid CUID',
+          'any.required': 'Session ID is required'
+        })
       })
     }, {
       files: {

@@ -122,8 +122,8 @@ export const validationSchemas = {
   sessions: {
     sessionId: {
       params: Joi.object({
-        id: Joi.string().uuid().required().messages({
-          'string.uuid': 'Session ID must be a valid UUID',
+        id: Joi.string().pattern(/^c[a-z0-9]{24}$/).required().messages({
+          'string.pattern.base': 'Session ID must be a valid CUID',
           'any.required': 'Session ID is required'
         })
       })

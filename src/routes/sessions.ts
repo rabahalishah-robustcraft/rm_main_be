@@ -337,6 +337,98 @@ router.get('/:id',
   }
 });
 
+/**
+ * Get audio file URL for playback
+ * GET /api/sessions/:id/audio-url
+ * Requirements: 5.3
+ * 
+ * NOTE: This endpoint requires S3 GetObject permissions
+ * Returns a presigned URL valid for 1 hour for audio playback
+ */
+router.get('/:id/audio-url', 
+  authenticate, 
+  enforceDataIsolation('session'), 
+  validateRequest(validationSchemas.sessions.sessionId),
+  async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = req.params.id;
+    const userId = req.user!.id;
+
+    const session = await audioSessionService.getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    // Verify session belongs to user
+    if (session.userId !== userId) {
+      return res.status(403).json({
+        error: {
+          code: 'SESSION_ACCESS_DENIED',
+          message: 'You do not have access to this session'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    // Check if audio file exists
+    if (!session.audioS3Key) {
+      return res.status(404).json({
+        error: {
+          code: 'AUDIO_NOT_FOUND',
+          message: 'Audio file not found for this session'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    // Generate presigned URL (valid for 1 hour)
+    const presignedUrl = await services.s3Service.getSignedUrl(session.audioS3Key, 3600);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        url: presignedUrl,
+        expiresIn: 3600,
+        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString()
+      }
+    });
+    return;
+  } catch (error) {
+    console.error('Audio URL generation error:', error);
+    
+    // Check if it's an S3 permission error
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'AccessDenied') {
+      return res.status(403).json({
+        error: {
+          code: 'S3_ACCESS_DENIED',
+          message: 'Unable to access audio file. S3 GetObject permission may be missing.'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to generate audio URL'
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    });
+    return;
+  }
+});
+
   return router;
 }
 

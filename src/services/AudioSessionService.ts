@@ -109,12 +109,20 @@ export class AudioSessionService {
   /**
    * Upload audio file and initiate processing
    * Requirements: 3.2
+   * 
+   * IMPORTANT: Process audio BEFORE uploading to S3 to avoid GetObject permission issues
+   * Flow: Receive -> Transcribe -> Analyze -> Upload to S3 (for archival only)
    */
   async uploadAudio(sessionId: string, audioBuffer: Buffer, filename: string = 'audio.wav'): Promise<void> {
     try {
       // Verify session exists and is in pending state
       const session = await this.prisma.audioSession.findUnique({
-        where: { id: sessionId }
+        where: { id: sessionId },
+        include: {
+          user: {
+            include: { profile: true }
+          }
+        }
       });
 
       if (!session) {
@@ -128,24 +136,14 @@ export class AudioSessionService {
         );
       }
 
-      // Generate unique S3 key for audio file
-      const sanitizedFilename = sanitizeFilename(filename);
-      const s3Key = `audio-sessions/${sessionId}/${Date.now()}-${sanitizedFilename}`;
-
-      // Upload audio to S3
-      await this.s3Service.upload(s3Key, audioBuffer, { contentType: 'audio/wav' });
-
-      // Update session with S3 key and processing status
+      // Update session to processing status
       await this.prisma.audioSession.update({
         where: { id: sessionId },
-        data: {
-          audioS3Key: s3Key,
-          status: SessionStatus.PROCESSING
-        }
+        data: { status: SessionStatus.PROCESSING }
       });
 
-      // Initiate async processing
-      this.processAudioAsync(sessionId).catch(error => {
+      // Process audio immediately (before S3 upload)
+      this.processAudioInMemory(sessionId, audioBuffer, filename, session).catch(error => {
         console.error(`Failed to process audio for session ${sessionId}:`, error);
         // Update session status to failed
         this.prisma.audioSession.update({
@@ -169,8 +167,113 @@ export class AudioSessionService {
   }
 
   /**
-   * Process audio file through AI analysis pipeline
+   * Process audio file in memory (without downloading from S3)
    * Requirements: 3.3, 3.4, 4.1, 4.2, 4.3, 4.4
+   * 
+   * This method processes audio directly from memory buffer to avoid S3 GetObject permission issues
+   */
+  private async processAudioInMemory(
+    sessionId: string, 
+    audioBuffer: Buffer, 
+    filename: string,
+    session: any
+  ): Promise<void> {
+    try {
+      // Step 1: Transcribe audio using Whisper (directly from buffer)
+      console.log(`Starting audio transcription for session ${sessionId}`);
+      const transcriptionResult = await this.openaiService.transcribeAudio(
+        audioBuffer,
+        filename
+      );
+
+      // Update session with transcript
+      await this.prisma.audioSession.update({
+        where: { id: sessionId },
+        data: { transcript: transcriptionResult.text }
+      });
+
+      console.log(`Transcription completed for session ${sessionId}`);
+
+      // Step 2: Analyze response using GPT with user context
+      const userContext: UserContext = {
+        profile: session.user.profile!,
+        targetRole: session.user.profile?.targetIndustry && session.user.profile?.targetJobTitle
+          ? {
+              industry: session.user.profile.targetIndustry,
+              jobTitle: session.user.profile.targetJobTitle
+            }
+          : undefined
+      };
+
+      console.log(`Starting AI analysis for session ${sessionId}`);
+      const analysis = await this.openaiService.analyzeResponse(
+        transcriptionResult.text,
+        userContext
+      );
+
+      // Step 3: Store analysis results and scores
+      await this.updateSessionWithAnalysis(sessionId, analysis);
+
+      // Step 4: Update AI attributes in user profile
+      await this.updateUserAIAttributes(session.userId, analysis.aiAttributes);
+
+      console.log(`AI analysis completed for session ${sessionId}`);
+
+      // Step 5: Upload audio to S3 for archival (after processing is complete)
+      const sanitizedFilename = sanitizeFilename(filename);
+      const s3Key = `audio-sessions/${sessionId}/${Date.now()}-${sanitizedFilename}`;
+      
+      try {
+        await this.s3Service.upload(s3Key, audioBuffer, { contentType: 'audio/wav' });
+        console.log(`Audio uploaded to S3 for session ${sessionId}: ${s3Key}`);
+        
+        // Update session with S3 key
+        await this.prisma.audioSession.update({
+          where: { id: sessionId },
+          data: { audioS3Key: s3Key }
+        });
+      } catch (s3Error) {
+        // S3 upload failure is not critical since processing is already complete
+        console.error(`Failed to upload audio to S3 for session ${sessionId}:`, s3Error);
+        // Continue without throwing - the session is still valid
+      }
+
+      // Mark session as completed and increment usage
+      await this.prisma.audioSession.update({
+        where: { id: sessionId },
+        data: { status: SessionStatus.COMPLETED }
+      });
+
+      // Increment usage count after successful session completion
+      // Requirements: 3.5, 6.2
+      await this.subscriptionService.incrementUsage(session.userId);
+
+      console.log(`Session ${sessionId} processing completed successfully`);
+
+    } catch (error) {
+      // Mark session as failed
+      await this.prisma.audioSession.update({
+        where: { id: sessionId },
+        data: { status: SessionStatus.FAILED }
+      }).catch(() => {}); // Ignore update errors
+
+      if (error instanceof AudioSessionError) {
+        throw error;
+      }
+      throw new AudioSessionError(
+        'Failed to process audio',
+        'AUDIO_PROCESSING_FAILED',
+        error as Error
+      );
+    }
+  }
+
+  /**
+   * Process audio file through AI analysis pipeline (legacy method - downloads from S3)
+   * Requirements: 3.3, 3.4, 4.1, 4.2, 4.3, 4.4
+   * 
+   * NOTE: This method is kept for backward compatibility but should not be used
+   * due to S3 GetObject permission issues. Use processAudioInMemory instead.
    */
   async processAudio(sessionId: string): Promise<void> {
     try {
