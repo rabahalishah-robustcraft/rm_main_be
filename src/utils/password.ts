@@ -215,13 +215,11 @@ class PasswordUtils {
 // Export singleton instance
 export const passwordUtils = new PasswordUtils();
 
-// Export individual functions for convenience
-export const {
-  hashPassword,
-  verifyPassword,
-  validatePassword,
-  generateSecurePassword,
-  needsRehash,
-  getPasswordStrength,
-  getPasswordStrengthDescription
-} = passwordUtils;
+// Export individual functions for convenience with proper binding
+export const hashPassword = passwordUtils.hashPassword.bind(passwordUtils);
+export const verifyPassword = passwordUtils.verifyPassword.bind(passwordUtils);
+export const validatePassword = passwordUtils.validatePassword.bind(passwordUtils);
+export const generateSecurePassword = passwordUtils.generateSecurePassword.bind(passwordUtils);
+export const needsRehash = passwordUtils.needsRehash.bind(passwordUtils);
+export const getPasswordStrength = passwordUtils.getPasswordStrength.bind(passwordUtils);
+export const getPasswordStrengthDescription = passwordUtils.getPasswordStrengthDescription.bind(passwordUtils);

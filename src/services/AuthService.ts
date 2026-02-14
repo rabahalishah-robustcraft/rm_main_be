@@ -42,47 +42,57 @@ export class AuthService implements IAuthService {
       // Hash password with bcrypt (minimum 12 salt rounds)
       const passwordHash = await hashPassword(password);
 
-      // Create user with default free subscription tier
-      const dbUser = await this.prisma.user.create({
-        data: {
-          email: email.toLowerCase(),
-          passwordHash,
-          subscriptionTier: SubscriptionTier.FREE
-        }
-      });
+      // Use a transaction to ensure atomicity - if anything fails, rollback everything
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Create user with default free subscription tier
+        const dbUser = await tx.user.create({
+          data: {
+            email: email.toLowerCase(),
+            passwordHash,
+            subscriptionTier: SubscriptionTier.FREE
+          }
+        });
 
-      // Convert database user to application user type
-      const user: User = {
-        id: dbUser.id,
-        email: dbUser.email,
-        passwordHash: dbUser.passwordHash,
-        subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
-        createdAt: dbUser.createdAt,
-        updatedAt: dbUser.updatedAt
-      };
+        // Convert database user to application user type
+        const user: User = {
+          id: dbUser.id,
+          email: dbUser.email,
+          passwordHash: dbUser.passwordHash,
+          subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
+          createdAt: dbUser.createdAt,
+          updatedAt: dbUser.updatedAt
+        };
 
-      // Generate JWT token
-      const token = generateToken({
-        userId: user.id,
-        email: user.email,
-        subscriptionTier: user.subscriptionTier
-      });
-
-      // Create default user profile
-      await this.prisma.userProfile.create({
-        data: {
+        // Generate JWT token (if this fails, the transaction will rollback)
+        const token = generateToken({
           userId: user.id,
-          aiAttributes: {},
-          extractedSkills: []
-        }
+          email: user.email,
+          subscriptionTier: user.subscriptionTier
+        });
+
+        // Create default user profile
+        await tx.userProfile.create({
+          data: {
+            userId: user.id,
+            aiAttributes: {},
+            extractedSkills: []
+          }
+        });
+
+        return { user, token };
       });
 
-      return { user, token };
+      return result;
     } catch (error) {
       if (error instanceof ValidationError || error instanceof AuthenticationError) {
         throw error;
       }
-      throw new AuthenticationError('Registration failed', { error: (error as Error).message });
+      // Log the actual error for debugging
+      console.error('Registration error:', error);
+      throw new AuthenticationError('Registration failed', { 
+        error: (error as Error).message,
+        stack: (error as Error).stack 
+      });
     }
   }
 

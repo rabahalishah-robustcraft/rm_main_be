@@ -161,6 +161,18 @@ export class ProfileService implements IProfileService {
         throw new NotFoundError('Profile not found');
       }
 
+      // Extract text from PDF/DOC BEFORE uploading to S3
+      // Requirements 3.2, 3.3: Use PDF/DOC parsing libraries
+      // Requirement 3.5: Wrap text extraction in try-catch with descriptive errors
+      let extractedText: string;
+      try {
+        extractedText = await this.resumeTextExtractor.extractText(file, filename);
+      } catch (error) {
+        const errorMessage = `Failed to extract text from resume file ${filename}: ${(error as Error).message}`;
+        console.error(errorMessage, error);
+        throw new ExternalServiceError(errorMessage);
+      }
+
       // Generate unique S3 key
       const sanitizedFilename = sanitizeFilename(filename);
       const s3Key = this.s3Service.generateFileKey(S3_CONFIG.RESUME_PREFIX, userId, sanitizedFilename);
@@ -189,15 +201,16 @@ export class ProfileService implements IProfileService {
         }
       }
 
+      // Process resume with extracted text (asynchronously)
+      // This updates the profile with skills and experience level
+      this.processResumeFromText(userId, extractedText).catch(error => {
+        console.error(`Failed to process resume for user ${userId}:`, error);
+      });
+
       // Update profile with resume S3 key
       await this.prisma.userProfile.update({
         where: { userId },
         data: { resumeS3Key: s3Key }
-      });
-
-      // Trigger resume processing asynchronously
-      this.processResume(userId, s3Key).catch(error => {
-        console.error(`Failed to process resume for user ${userId}:`, error);
       });
 
       return s3Key;
@@ -210,8 +223,75 @@ export class ProfileService implements IProfileService {
   }
 
   /**
-   * Process resume and extract data using AI
+   * Process resume from extracted text using AI
+   * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 8.4
+   */
+  async processResumeFromText(userId: string, extractedText: string): Promise<void> {
+    try {
+      // Validate inputs
+      if (!ValidationUtils.isValidUUID(userId)) {
+        throw new ValidationError('Invalid user ID format');
+      }
+
+      if (!extractedText || extractedText.trim().length === 0) {
+        throw new ValidationError('Extracted text is required');
+      }
+
+      // Check if profile exists
+      const existingProfile = await this.prisma.userProfile.findUnique({
+        where: { userId }
+      });
+
+      if (!existingProfile) {
+        throw new NotFoundError('Profile not found');
+      }
+
+      // Use OpenAI to extract structured data from the text
+      // Requirement 4.1: Call OpenAIService.extractResumeData()
+      if (!this.openaiService) {
+        throw new ExternalServiceError('OpenAI service not available');
+      }
+
+      let resumeData: ResumeData;
+      try {
+        resumeData = await this.openaiService.extractResumeData(extractedText);
+        
+        // Validate extracted data structure before storing
+        // Requirement 4.3: Validate JSON structure contains required fields
+        this.validateResumeData(resumeData);
+      } catch (error) {
+        // Requirement 4.5: Use basic keyword extraction as fallback for GPT failures
+        // Requirement 8.4: Log that fallback was used and why
+        console.warn(
+          `GPT extraction failed for user ${userId}, using keyword extraction fallback. ` +
+          `Reason: ${(error as Error).message}`,
+          error
+        );
+        
+        resumeData = this.extractResumeDataWithKeywords(extractedText);
+      }
+
+      // Update profile with extracted skills and experience level
+      // Requirement 4.4: Update profile with extracted data
+      await this.prisma.userProfile.update({
+        where: { userId },
+        data: {
+          extractedSkills: resumeData.skills,
+          experienceLevel: resumeData.experienceLevel
+        }
+      });
+    } catch (error) {
+      if (error instanceof ValidationError || error instanceof NotFoundError) {
+        throw error;
+      }
+      throw new ExternalServiceError('Failed to process resume', { error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Process resume and extract data using AI (downloads from S3)
    * Requirements: 2.1, 2.2, 3.4, 4.1, 4.2, 4.3, 4.4, 3.5, 4.5, 8.4
+   * @deprecated Use processResumeFromText during upload instead to avoid extra S3 download
    */
   async processResume(userId: string, s3Key: string): Promise<void> {
     try {

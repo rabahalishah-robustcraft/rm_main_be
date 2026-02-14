@@ -1,5 +1,5 @@
-import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
+const { PDFParse } = require('pdf-parse');
 
 /**
  * Interface for text extraction from different file formats
@@ -33,10 +33,10 @@ export class PDFTextExtractor implements TextExtractor {
 
   async extract(buffer: Buffer): Promise<string> {
     try {
-      // Create PDFParse instance with the buffer data
+      // pdf-parse v2 requires creating a PDFParse instance
       const parser = new PDFParse({ data: buffer });
-      // Extract text from the PDF
       const result = await parser.getText();
+      await parser.destroy(); // Clean up resources
       return result.text;
     } catch (error) {
       throw new Error(`Failed to extract text from PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);

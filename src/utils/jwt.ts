@@ -149,13 +149,11 @@ class JWTUtils {
 // Export singleton instance
 export const jwtUtils = new JWTUtils();
 
-// Export individual functions for convenience
-export const {
-  generateToken,
-  validateToken,
-  decodeToken,
-  extractTokenFromHeader,
-  isTokenExpired,
-  refreshToken,
-  getTokenExpiration
-} = jwtUtils;
+// Export individual functions for convenience with proper binding
+export const generateToken = jwtUtils.generateToken.bind(jwtUtils);
+export const validateToken = jwtUtils.validateToken.bind(jwtUtils);
+export const decodeToken = jwtUtils.decodeToken.bind(jwtUtils);
+export const extractTokenFromHeader = jwtUtils.extractTokenFromHeader.bind(jwtUtils);
+export const isTokenExpired = jwtUtils.isTokenExpired.bind(jwtUtils);
+export const refreshToken = jwtUtils.refreshToken.bind(jwtUtils);
+export const getTokenExpiration = jwtUtils.getTokenExpiration.bind(jwtUtils);

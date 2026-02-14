@@ -1,44 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
-
-// Local type definitions to avoid import issues
-enum ErrorCode {
-  // Validation Errors (400)
-  VALIDATION_ERROR = 'VALIDATION_ERROR',
-  INVALID_INPUT = 'INVALID_INPUT',
-  MISSING_REQUIRED_FIELD = 'MISSING_REQUIRED_FIELD',
-  
-  // Authentication Errors (401)
-  AUTHENTICATION_ERROR = 'AUTHENTICATION_ERROR',
-  INVALID_CREDENTIALS = 'INVALID_CREDENTIALS',
-  TOKEN_EXPIRED = 'TOKEN_EXPIRED',
-  TOKEN_INVALID = 'TOKEN_INVALID',
-  
-  // Authorization Errors (403)
-  AUTHORIZATION_ERROR = 'AUTHORIZATION_ERROR',
-  INSUFFICIENT_PERMISSIONS = 'INSUFFICIENT_PERMISSIONS',
-  
-  // Not Found Errors (404)
-  NOT_FOUND = 'NOT_FOUND',
-  USER_NOT_FOUND = 'USER_NOT_FOUND',
-  SESSION_NOT_FOUND = 'SESSION_NOT_FOUND',
-  PROFILE_NOT_FOUND = 'PROFILE_NOT_FOUND',
-  
-  // Usage Limit Errors (429)
-  USAGE_LIMIT_ERROR = 'USAGE_LIMIT_ERROR',
-  MONTHLY_LIMIT_EXCEEDED = 'MONTHLY_LIMIT_EXCEEDED',
-  RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
-  
-  // External Service Errors (502)
-  EXTERNAL_SERVICE_ERROR = 'EXTERNAL_SERVICE_ERROR',
-  OPENAI_API_ERROR = 'OPENAI_API_ERROR',
-  S3_UPLOAD_ERROR = 'S3_UPLOAD_ERROR',
-  TRANSCRIPTION_ERROR = 'TRANSCRIPTION_ERROR',
-  
-  // Internal Errors (500)
-  INTERNAL_ERROR = 'INTERNAL_ERROR',
-  DATABASE_ERROR = 'DATABASE_ERROR',
-  CONFIGURATION_ERROR = 'CONFIGURATION_ERROR'
-}
+import { 
+  AppError, 
+  ValidationError, 
+  AuthenticationError, 
+  NotFoundError,
+  ExternalServiceError,
+  ErrorCode 
+} from '../types/auth';
 
 interface ErrorResponse {
   error: {
@@ -50,53 +18,16 @@ interface ErrorResponse {
   path: string;
 }
 
-class AppError extends Error {
-  public readonly code: ErrorCode;
-  public readonly statusCode: number;
-  public readonly details?: any;
-
-  constructor(code: ErrorCode, message: string, statusCode: number = 500, details?: any) {
-    super(message);
-    this.code = code;
-    this.statusCode = statusCode;
-    this.details = details;
-    this.name = 'AppError';
-  }
-}
-
-class ValidationError extends AppError {
-  constructor(message: string, details?: any) {
-    super(ErrorCode.VALIDATION_ERROR, message, 400, details);
-  }
-}
-
-class AuthenticationError extends AppError {
-  constructor(message: string = 'Authentication failed', details?: any) {
-    super(ErrorCode.AUTHENTICATION_ERROR, message, 401, details);
-  }
-}
-
+// Additional error classes not in auth types
 class AuthorizationError extends AppError {
   constructor(message: string = 'Insufficient permissions', details?: any) {
     super(ErrorCode.AUTHORIZATION_ERROR, message, 403, details);
   }
 }
 
-class NotFoundError extends AppError {
-  constructor(message: string = 'Resource not found', details?: any) {
-    super(ErrorCode.NOT_FOUND, message, 404, details);
-  }
-}
-
 class UsageLimitError extends AppError {
   constructor(message: string = 'Usage limit exceeded', details?: any) {
     super(ErrorCode.USAGE_LIMIT_ERROR, message, 429, details);
-  }
-}
-
-class ExternalServiceError extends AppError {
-  constructor(message: string = 'External service error', details?: any) {
-    super(ErrorCode.EXTERNAL_SERVICE_ERROR, message, 502, details);
   }
 }
 

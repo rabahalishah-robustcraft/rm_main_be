@@ -33,11 +33,13 @@ const emailSchema = Joi.string()
     'string.max': 'Email address is too long'
   });
 
-// Custom UUID validation
+// Custom UUID/CUID validation
+// CUID format: starts with 'c', followed by timestamp and random characters (25 chars total)
+// UUID format: standard UUIDv4
 const uuidSchema = Joi.string()
-  .uuid({ version: 'uuidv4' })
+  .pattern(/^(c[a-z0-9]{24}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i)
   .messages({
-    'string.guid': 'Invalid ID format'
+    'string.pattern.base': 'Invalid ID format'
   });
 
 // File validation schemas
@@ -336,9 +338,12 @@ export class ValidationUtils {
   }
 
   /**
-   * Check if string is a valid UUID
+   * Check if string is a valid UUID or CUID
    */
   static isValidUUID(uuid: string): boolean {
+    if (!uuid || typeof uuid !== 'string') {
+      return false;
+    }
     try {
       this.validate(uuid, uuidSchema);
       return true;

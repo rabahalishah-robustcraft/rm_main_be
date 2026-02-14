@@ -145,6 +145,7 @@ export interface ProfileService {
   getProfile(userId: string): Promise<UserProfile>;
   updateProfile(userId: string, data: ProfileUpdateData): Promise<UserProfile>;
   uploadResume(userId: string, file: Buffer, filename: string): Promise<string>;
+  processResumeFromText(userId: string, extractedText: string): Promise<void>;
   processResume(userId: string, s3Key: string): Promise<void>;
   setTargetRole(userId: string, industry: string, jobTitle: string): Promise<void>;
   deleteProfile(userId: string): Promise<void>;

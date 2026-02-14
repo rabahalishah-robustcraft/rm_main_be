@@ -51,10 +51,25 @@ export function createComprehensiveValidation(
     const warnings: string[] = [];
 
     try {
-      // 1. Sanitize input if enabled
+      // 1. Sanitize input if enabled (but preserve password fields)
       if (sanitizeInput) {
+        const passwordFields = ['password', 'newPassword', 'currentPassword'];
+        const preservedPasswords: Record<string, any> = {};
+        
+        // Preserve password fields before sanitization
+        passwordFields.forEach(field => {
+          if (req.body && req.body[field]) {
+            preservedPasswords[field] = req.body[field];
+          }
+        });
+        
         req.body = sanitizeObject(req.body);
         req.query = sanitizeObject(req.query);
+        
+        // Restore password fields after sanitization
+        Object.keys(preservedPasswords).forEach(field => {
+          req.body[field] = preservedPasswords[field];
+        });
       }
 
       // 2. Validate request body
