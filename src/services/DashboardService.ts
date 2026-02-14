@@ -17,7 +17,7 @@ export interface DashboardStats {
   };
   recentInsights: string[];
   usageThisMonth: number;
-  usageLimit: number;
+  usageLimit: number | null; // null indicates unlimited
 }
 
 export interface Insight {
@@ -119,7 +119,7 @@ export class DashboardService {
       });
 
       const usageThisMonth = usageRecord?.sessionCount || 0;
-      const usageLimit = user.subscriptionTier === 'paid' ? -1 : 3; // -1 means unlimited
+      const usageLimit = user.subscriptionTier === 'paid' ? null : 3; // null means unlimited
 
       return {
         confidenceScore,

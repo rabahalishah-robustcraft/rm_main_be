@@ -12,7 +12,7 @@ export enum SubscriptionTier {
 
 export interface UsageInfo {
   currentUsage: number;
-  limit: number;
+  limit: number | null; // null indicates unlimited
   canCreateSession: boolean;
   tier: SubscriptionTier;
 }
@@ -77,8 +77,11 @@ export class SubscriptionService {
         throw new SubscriptionError('User not found', 'USER_NOT_FOUND');
       }
 
+      // Normalize tier to lowercase to handle any case variations
+      const tier = user.subscriptionTier.toLowerCase() as SubscriptionTier;
+
       // Paid users have unlimited sessions
-      if (user.subscriptionTier === SubscriptionTier.PAID) {
+      if (tier === SubscriptionTier.PAID) {
         return true;
       }
 
@@ -155,7 +158,8 @@ export class SubscriptionService {
         throw new SubscriptionError('User not found', 'USER_NOT_FOUND');
       }
 
-      const tier = user.subscriptionTier as SubscriptionTier;
+      // Normalize tier to lowercase to handle any case variations
+      const tier = user.subscriptionTier.toLowerCase() as SubscriptionTier;
       const currentDate = new Date();
       const currentMonth = currentDate.getMonth() + 1;
       const currentYear = currentDate.getFullYear();
@@ -163,7 +167,7 @@ export class SubscriptionService {
       if (tier === SubscriptionTier.PAID) {
         return {
           currentUsage: 0,
-          limit: -1, // Unlimited
+          limit: null, // null indicates unlimited
           canCreateSession: true,
           tier
         };
@@ -195,9 +199,12 @@ export class SubscriptionService {
    */
   async upgradeSubscription(userId: string, tier: SubscriptionTier): Promise<void> {
     try {
+      // Normalize tier to lowercase to match enum values
+      const normalizedTier = tier.toLowerCase() as SubscriptionTier;
+      
       await this.prisma.user.update({
         where: { id: userId },
-        data: { subscriptionTier: tier }
+        data: { subscriptionTier: normalizedTier }
       });
     } catch (error) {
       throw new SubscriptionError(

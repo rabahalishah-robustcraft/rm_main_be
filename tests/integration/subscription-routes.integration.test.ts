@@ -89,7 +89,7 @@ describe('Subscription Routes Integration Tests', () => {
         data: {
           tier: SubscriptionTier.PAID,
           currentUsage: 0,
-          limit: -1,
+          limit: null,
           canCreateSession: true
         }
       });

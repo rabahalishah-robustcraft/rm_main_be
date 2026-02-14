@@ -227,7 +227,7 @@ describe('SubscriptionService', () => {
 
       expect(result).toEqual({
         currentUsage: 0,
-        limit: -1,
+        limit: null,
         canCreateSession: true,
         tier: SubscriptionTier.PAID
       });
