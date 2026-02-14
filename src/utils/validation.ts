@@ -98,14 +98,7 @@ export const profileSchemas = {
   updateProfile: Joi.object({
     targetIndustry: Joi.string().max(100).trim().optional(),
     targetJobTitle: Joi.string().max(100).trim().optional(),
-    experienceLevel: Joi.string().valid(
-      'entry',
-      'junior',
-      'mid',
-      'senior',
-      'lead',
-      'executive'
-    ).optional()
+    experienceLevel: Joi.string().max(50).trim().optional() // Open field - any experience level
   }).min(1).messages({
     'object.min': 'At least one field must be provided for update'
   }),

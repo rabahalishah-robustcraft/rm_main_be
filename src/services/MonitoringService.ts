@@ -62,16 +62,21 @@ export class MonitoringService {
 
     // Initialize S3 client if AWS credentials are configured
     if (config.AWS_ACCESS_KEY_ID && config.AWS_SECRET_ACCESS_KEY) {
-      AWS.config.update({
-        accessKeyId: config.AWS_ACCESS_KEY_ID,
-        secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
-        region: config.AWS_REGION
-      });
-      
-      this.s3Client = new AWS.S3({
-        apiVersion: '2006-03-01',
-        signatureVersion: 'v4'
-      });
+      try {
+        AWS.config.update({
+          accessKeyId: config.AWS_ACCESS_KEY_ID,
+          secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
+          region: config.AWS_REGION
+        });
+        
+        this.s3Client = new AWS.S3({
+          apiVersion: '2006-03-01',
+          signatureVersion: 'v4'
+        });
+      } catch (error) {
+        console.error('Failed to initialize S3 client:', error);
+        this.s3Client = null;
+      }
     }
 
     // Start periodic monitoring
@@ -165,7 +170,8 @@ export class MonitoringService {
       });
     } catch (error) {
       console.error('Error collecting system metrics:', error);
-      this.addAlert('critical', 'Failed to collect system metrics', (error as Error).message);
+      const errorMessage = (error as Error)?.message || String(error) || 'Unknown error';
+      this.addAlert('critical', 'Failed to collect system metrics', errorMessage);
     }
   }
 
@@ -237,9 +243,10 @@ export class MonitoringService {
       };
     } catch (error) {
       console.error('Database metrics error:', error);
+      const errorMessage = (error as Error)?.message || String(error) || 'Unknown error';
       return {
         status: 'error',
-        error: (error as Error).message
+        error: errorMessage
       };
     }
   }
@@ -389,9 +396,10 @@ export class MonitoringService {
         details: responseTime > 1000 ? 'Slow database response' : null
       };
     } catch (error) {
+      const errorMessage = (error as Error)?.message || String(error) || 'Unknown error';
       return {
         status: 'unhealthy',
-        error: (error as Error).message
+        error: errorMessage
       };
     }
   }
@@ -456,14 +464,15 @@ export class MonitoringService {
       };
     } catch (error) {
       // Requirement 11.4: Catch and log errors, mark as unhealthy
+      const errorMessage = (error as Error)?.message || String(error) || 'Unknown error';
       console.error('OpenAI health check failed', {
-        error: (error as Error).message,
+        error: errorMessage,
         timestamp: new Date().toISOString()
       });
       
       return {
         status: 'unhealthy',
-        error: (error as Error).message,
+        error: errorMessage,
         message: 'OpenAI API health check failed',
         lastChecked: new Date()
       };
@@ -495,14 +504,21 @@ export class MonitoringService {
       };
     }
 
+    // Check if S3 health checks are disabled
+    if (process.env.DISABLE_S3_HEALTH_CHECK === 'true') {
+      return {
+        status: 'disabled',
+        message: 'S3 health checks are disabled'
+      };
+    }
+
     try {
       const startTime = Date.now();
       
-      // Call S3 listObjectsV2 with MaxKeys=1
+      // Use headBucket instead of listObjectsV2 - requires less permissions
       // Requirement 11.2: Make real API call to S3
-      await this.s3Client.listObjectsV2({
-        Bucket: config.AWS_S3_BUCKET,
-        MaxKeys: 1
+      await this.s3Client.headBucket({
+        Bucket: config.AWS_S3_BUCKET
       }).promise();
       
       const responseTime = Date.now() - startTime;
@@ -534,15 +550,29 @@ export class MonitoringService {
       };
     } catch (error) {
       // Requirement 11.4: Catch and log errors, mark as unhealthy
-      console.error('S3 health check failed', {
-        error: (error as Error).message,
-        timestamp: new Date().toISOString()
-      });
+      // Don't log as error if it's just a permission issue - log as warning instead
+      const errorMessage = (error as Error)?.message || String(error) || 'Unknown error';
+      const isPermissionError = errorMessage.includes('not authorized') || errorMessage.includes('AccessDenied');
+      
+      if (isPermissionError) {
+        console.warn('S3 health check - permission issue (non-critical)', {
+          error: errorMessage,
+          timestamp: new Date().toISOString(),
+          suggestion: 'Add s3:HeadBucket permission or set DISABLE_S3_HEALTH_CHECK=true'
+        });
+      } else {
+        console.error('S3 health check failed', {
+          error: errorMessage,
+          timestamp: new Date().toISOString()
+        });
+      }
       
       return {
-        status: 'unhealthy',
-        error: (error as Error).message,
-        message: 'S3 API health check failed',
+        status: isPermissionError ? 'permission_denied' : 'unhealthy',
+        error: errorMessage,
+        message: isPermissionError 
+          ? 'S3 health check disabled due to insufficient permissions' 
+          : 'S3 API health check failed',
         lastChecked: new Date()
       };
     }

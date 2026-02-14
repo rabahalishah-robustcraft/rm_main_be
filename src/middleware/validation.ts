@@ -107,7 +107,8 @@ export const validationSchemas = {
     update: {
       body: Joi.object({
         targetIndustry: Joi.string().optional(),
-        targetJobTitle: Joi.string().optional()
+        targetJobTitle: Joi.string().optional(),
+        experienceLevel: Joi.string().max(50).optional() // Open field - any experience level
       }).min(1)
     },
     targetRole: {

@@ -73,7 +73,7 @@ export class StartupValidator {
 
       return { success, errors };
     } catch (error) {
-      const errorMessage = `Startup validation failed: ${(error as Error).message}`;
+      const errorMessage = `Startup validation failed: ${(error as Error)?.message || String(error) || 'Unknown error'}`;
       console.error('💥', errorMessage);
       return { success: false, errors: [errorMessage] };
     }
@@ -99,7 +99,7 @@ export class StartupValidator {
       this.validationResults.configuration = true;
       return { success: true, errors: [] };
     } catch (error) {
-      const errorMessage = `Configuration validation failed: ${(error as Error).message}`;
+      const errorMessage = `Configuration validation failed: ${(error as Error)?.message || String(error) || 'Unknown error'}`;
       return { success: false, errors: [errorMessage] };
     }
   }
@@ -123,7 +123,7 @@ export class StartupValidator {
       this.validationResults.database = true;
       return { success: true, errors: [] };
     } catch (error) {
-      const errorMessage = `Database validation failed: ${(error as Error).message}`;
+      const errorMessage = `Database validation failed: ${(error as Error)?.message || String(error) || 'Unknown error'}`;
       return { success: false, errors: [errorMessage] };
     }
   }
@@ -192,7 +192,7 @@ export class StartupValidator {
       this.validationResults.monitoring = true;
       return { success: true, errors: [] };
     } catch (error) {
-      const errorMessage = `Monitoring initialization failed: ${(error as Error).message}`;
+      const errorMessage = `Monitoring initialization failed: ${(error as Error)?.message || String(error) || 'Unknown error'}`;
       return { success: false, errors: [errorMessage] };
     }
   }

@@ -325,7 +325,8 @@ export const endpointValidation = {
     update: createComprehensiveValidation({
       body: Joi.object({
         targetIndustry: Joi.string().max(100).optional(),
-        targetJobTitle: Joi.string().max(100).optional()
+        targetJobTitle: Joi.string().max(100).optional(),
+        experienceLevel: Joi.string().max(50).optional() // Open field - any experience level
       }).min(1).messages({
         'object.min': 'At least one field must be provided for update'
       })
