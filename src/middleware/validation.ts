@@ -131,7 +131,8 @@ export const validationSchemas = {
     history: {
       query: Joi.object({
         limit: Joi.number().integer().min(1).max(100).optional(),
-        offset: Joi.number().integer().min(0).optional()
+        offset: Joi.number().integer().min(0).optional(),
+        status: Joi.string().valid('completed', 'processing', 'failed', 'pending', 'all').optional()
       })
     }
   },

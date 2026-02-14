@@ -183,6 +183,10 @@ router.post('/:id/audio',
  * Get user's session history
  * GET /api/sessions/history
  * Requirements: 5.3
+ * 
+ * Query params:
+ * - limit: number of sessions to return (1-100, default 20)
+ * - status: filter by status - 'completed', 'processing', 'failed', 'pending', 'all' (default: 'completed')
  */
 router.get('/history', 
   authenticate, 
@@ -192,6 +196,7 @@ router.get('/history',
   try {
     const userId = req.user!.id;
     const limit = parseInt(req.query.limit as string) || 20;
+    const statusFilter = (req.query.status as string) || 'completed';
 
     if (limit < 1 || limit > 100) {
       return res.status(400).json({
@@ -204,7 +209,20 @@ router.get('/history',
       });
     }
 
-    const sessions = await audioSessionService.getSessionHistory(userId, limit);
+    // Validate status filter
+    const validStatuses = ['completed', 'processing', 'failed', 'pending', 'all'];
+    if (!validStatuses.includes(statusFilter)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_STATUS',
+          message: `Status must be one of: ${validStatuses.join(', ')}`
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    const sessions = await audioSessionService.getSessionHistory(userId, limit, statusFilter);
 
     const formattedSessions = sessions.map(session => ({
       id: session.id,
@@ -224,7 +242,8 @@ router.get('/history',
       success: true,
       data: {
         sessions: formattedSessions,
-        total: sessions.length
+        total: sessions.length,
+        filter: statusFilter
       }
     });
     return;

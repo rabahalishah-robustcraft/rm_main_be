@@ -391,11 +391,22 @@ export class AudioSessionService {
   /**
    * Get user's session history
    * Requirements: 5.3
+   * 
+   * @param userId - User ID
+   * @param limit - Maximum number of sessions to return
+   * @param statusFilter - Filter by status: 'completed', 'processing', 'failed', 'pending', or 'all'
    */
-  async getSessionHistory(userId: string, limit: number = 20): Promise<AudioSession[]> {
+  async getSessionHistory(userId: string, limit: number = 20, statusFilter: string = 'completed'): Promise<AudioSession[]> {
     try {
+      // Build where clause based on status filter
+      const whereClause: any = { userId };
+      
+      if (statusFilter !== 'all') {
+        whereClause.status = statusFilter;
+      }
+
       const sessions = await this.prisma.audioSession.findMany({
-        where: { userId },
+        where: whereClause,
         orderBy: { createdAt: 'desc' },
         take: limit
       });
