@@ -6,7 +6,7 @@ import prisma from '../lib/prisma';
 interface User {
   id: string;
   email: string;
-  passwordHash: string;
+  passwordHash: string | null;
   subscriptionTier: SubscriptionTier;
   createdAt: Date;
   updatedAt: Date;

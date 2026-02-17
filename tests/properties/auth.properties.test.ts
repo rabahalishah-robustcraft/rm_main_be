@@ -88,7 +88,7 @@ describe('Authentication Property Tests', () => {
             // Verify password is encrypted (not stored in plain text)
             expect(result.user.passwordHash).toBeDefined();
             expect(result.user.passwordHash).not.toBe(password);
-            expect(result.user.passwordHash.length).toBeGreaterThan(50);
+            expect(result.user.passwordHash!.length).toBeGreaterThan(50);
             
             // Verify JWT token is returned
             expect(result.token).toBeDefined();

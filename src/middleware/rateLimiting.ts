@@ -131,6 +131,15 @@ export const authRateLimit = createRateLimit({
 });
 
 /**
+ * Stricter rate limiting for password reset (forgot-password, verify-otp)
+ */
+export const passwordResetRateLimit = createRateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  maxRequests: 3, // 3 attempts per hour per IP
+  message: 'Too many password reset attempts. Please try again later.'
+});
+
+/**
  * General API rate limiting
  */
 export const apiRateLimit = createRateLimit({

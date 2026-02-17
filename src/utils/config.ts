@@ -62,6 +62,15 @@ const configSchema = Joi.object({
   // External Service Configuration
   REDIS_URL: Joi.string().uri().optional(),
   SENTRY_DSN: Joi.string().uri().optional(),
+
+  // Google OAuth (optional - use placeholders until client provides)
+  GOOGLE_CLIENT_ID: Joi.string().optional(),
+  GOOGLE_CLIENT_SECRET: Joi.string().optional(),
+
+  // Email (optional - Resend; use placeholders until client provides)
+  RESEND_API_KEY: Joi.string().optional(),
+  EMAIL_FROM_ADDRESS: Joi.string().email().optional(),
+  EMAIL_FROM_NAME: Joi.string().optional(),
   
   // Feature Flags
   ENABLE_RATE_LIMITING: Joi.boolean().default(true),
@@ -127,6 +136,15 @@ export interface Config {
   // External Service Configuration
   REDIS_URL?: string;
   SENTRY_DSN?: string;
+
+  // Google OAuth
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+
+  // Email (Resend)
+  RESEND_API_KEY?: string;
+  EMAIL_FROM_ADDRESS?: string;
+  EMAIL_FROM_NAME?: string;
   
   // Feature Flags
   ENABLE_RATE_LIMITING: boolean;

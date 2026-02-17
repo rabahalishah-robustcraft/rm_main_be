@@ -15,6 +15,13 @@ export interface JWTPayload {
   exp?: number;
 }
 
+export interface ResetTokenPayload {
+  email: string;
+  purpose: 'password_reset';
+  iat?: number;
+  exp?: number;
+}
+
 export interface JWTConfig {
   secret: string;
   expiresIn: string;
@@ -144,6 +151,52 @@ class JWTUtils {
       return null;
     }
   }
+
+  /**
+   * Generate a short-lived reset token for password reset flow
+   */
+  generateResetToken(email: string): string {
+    try {
+      const payload: Omit<ResetTokenPayload, 'iat' | 'exp'> = {
+        email: email.toLowerCase(),
+        purpose: 'password_reset'
+      };
+      return jwt.sign(payload, this.config.secret, {
+        expiresIn: '15m',
+        issuer: this.config.issuer,
+        algorithm: 'HS256'
+      } as jwt.SignOptions);
+    } catch (error) {
+      throw new AuthenticationError('Failed to generate reset token', { error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Validate and decode a password reset token
+   */
+  validateResetToken(token: string): ResetTokenPayload {
+    try {
+      const decoded = jwt.verify(token, this.config.secret, {
+        issuer: this.config.issuer,
+        algorithms: ['HS256']
+      }) as ResetTokenPayload;
+
+      if (decoded.purpose !== 'password_reset') {
+        throw new AuthenticationError('Invalid reset token');
+      }
+
+      return decoded;
+    } catch (error) {
+      if (error instanceof jwt.TokenExpiredError) {
+        throw new AuthenticationError('Reset token has expired');
+      } else if (error instanceof jwt.JsonWebTokenError) {
+        throw new AuthenticationError('Invalid reset token');
+      } else if (error instanceof AuthenticationError) {
+        throw error;
+      }
+      throw new AuthenticationError('Reset token validation failed', { error: (error as Error).message });
+    }
+  }
 }
 
 // Export singleton instance
@@ -152,6 +205,8 @@ export const jwtUtils = new JWTUtils();
 // Export individual functions for convenience with proper binding
 export const generateToken = jwtUtils.generateToken.bind(jwtUtils);
 export const validateToken = jwtUtils.validateToken.bind(jwtUtils);
+export const generateResetToken = jwtUtils.generateResetToken.bind(jwtUtils);
+export const validateResetToken = jwtUtils.validateResetToken.bind(jwtUtils);
 export const decodeToken = jwtUtils.decodeToken.bind(jwtUtils);
 export const extractTokenFromHeader = jwtUtils.extractTokenFromHeader.bind(jwtUtils);
 export const isTokenExpired = jwtUtils.isTokenExpired.bind(jwtUtils);

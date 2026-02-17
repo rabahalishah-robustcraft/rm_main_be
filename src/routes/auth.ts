@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { ServiceContainer } from '../container';
 import { authenticate } from '../middleware/auth';
-import { authRateLimit } from '../middleware/rateLimiting';
+import { authRateLimit, passwordResetRateLimit } from '../middleware/rateLimiting';
 import { asyncHandler } from '../middleware/error';
 import { validateRequest, validationSchemas } from '../middleware/validation';
 import { User, SubscriptionTier } from '../types/auth';
@@ -30,6 +30,11 @@ interface AuthResponse {
   token: string;
 }
 
+function toSafeUser(user: User) {
+  const { passwordHash, ...safe } = user;
+  return safe;
+}
+
 export function createAuthRoutes(services: ServiceContainer): Router {
   const router = Router();
   const { authService } = services;
@@ -50,7 +55,7 @@ export function createAuthRoutes(services: ServiceContainer): Router {
       res.status(201).json({
         success: true,
         message: 'User registered successfully',
-        user: result.user,
+        user: toSafeUser(result.user),
         token: result.token
       });
     })
@@ -72,7 +77,7 @@ export function createAuthRoutes(services: ServiceContainer): Router {
       res.status(200).json({
         success: true,
         message: 'Login successful',
-        user: result.user,
+        user: toSafeUser(result.user),
         token: result.token
       });
     })
@@ -146,6 +151,85 @@ export function createAuthRoutes(services: ServiceContainer): Router {
         success: true,
         message: 'Token refreshed successfully',
         token: newToken
+      });
+    })
+  );
+
+  /**
+   * Continue with Google - verify ID token and login/register
+   * POST /api/auth/google
+   */
+  router.post('/google',
+    authRateLimit,
+    validateRequest(validationSchemas.auth.google),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { idToken } = req.body;
+
+      const result = await authService.loginWithGoogle(idToken);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        user: toSafeUser(result.user),
+        token: result.token
+      });
+    })
+  );
+
+  /**
+   * Request password reset - sends OTP to email if user exists
+   * POST /api/auth/forgot-password
+   */
+  router.post('/forgot-password',
+    passwordResetRateLimit,
+    validateRequest(validationSchemas.auth.forgotPassword),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { email } = req.body;
+
+      await authService.requestPasswordReset(email);
+      
+      res.status(200).json({
+        success: true,
+        message: 'If an account exists with this email, you will receive a password reset code.'
+      });
+    })
+  );
+
+  /**
+   * Verify OTP and return reset token
+   * POST /api/auth/verify-otp
+   */
+  router.post('/verify-otp',
+    passwordResetRateLimit,
+    validateRequest(validationSchemas.auth.verifyOtp),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { email, otp } = req.body;
+
+      const { resetToken } = await authService.verifyOTP(email, otp);
+      
+      res.status(200).json({
+        success: true,
+        message: 'OTP verified successfully',
+        resetToken
+      });
+    })
+  );
+
+  /**
+   * Reset password using reset token
+   * POST /api/auth/reset-password
+   */
+  router.post('/reset-password',
+    authRateLimit,
+    validateRequest(validationSchemas.auth.resetPassword),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { resetToken, newPassword } = req.body;
+
+      await authService.resetPassword(resetToken, newPassword);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Password reset successfully'
       });
     })
   );

@@ -45,7 +45,7 @@ export enum ErrorCode {
 export interface User {
   id: string;
   email: string;
-  passwordHash: string;
+  passwordHash: string | null; // null for Google OAuth users
   subscriptionTier: SubscriptionTier;
   createdAt: Date;
   updatedAt: Date;

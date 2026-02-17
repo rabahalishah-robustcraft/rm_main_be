@@ -1,14 +1,42 @@
+import * as bcrypt from 'bcrypt';
+import { OAuth2Client } from 'google-auth-library';
 import { User, AuthService as IAuthService, SubscriptionTier, AuthenticationError, ValidationError } from '../types/auth';
 import { hashPassword, verifyPassword, validatePassword } from '../utils/password';
-import { generateToken, validateToken } from '../utils/jwt';
+import { generateToken, validateToken, generateResetToken, validateResetToken } from '../utils/jwt';
 import { PrismaClient } from '@prisma/client';
 import prismaClient from '../lib/prisma';
+import { IEmailService } from './EmailService';
+
+const OTP_EXPIRY_MINUTES = 10;
+const OTP_LENGTH = 6;
 
 export class AuthService implements IAuthService {
-  constructor(private prismaInstance?: PrismaClient) {}
+  constructor(
+    private prismaInstance?: PrismaClient,
+    private emailService?: IEmailService,
+    private googleClientId?: string
+  ) {}
 
   private get prisma(): PrismaClient {
     return this.prismaInstance || prismaClient;
+  }
+
+  private dbUserToUser(dbUser: {
+    id: string;
+    email: string;
+    passwordHash: string | null;
+    subscriptionTier: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }): User {
+    return {
+      id: dbUser.id,
+      email: dbUser.email,
+      passwordHash: dbUser.passwordHash,
+      subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
+      createdAt: dbUser.createdAt,
+      updatedAt: dbUser.updatedAt
+    };
   }
   /**
    * Register a new user with email and password
@@ -54,14 +82,7 @@ export class AuthService implements IAuthService {
         });
 
         // Convert database user to application user type
-        const user: User = {
-          id: dbUser.id,
-          email: dbUser.email,
-          passwordHash: dbUser.passwordHash,
-          subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
-          createdAt: dbUser.createdAt,
-          updatedAt: dbUser.updatedAt
-        };
+        const user = this.dbUserToUser(dbUser);
 
         // Generate JWT token (if this fails, the transaction will rollback)
         const token = generateToken({
@@ -116,21 +137,18 @@ export class AuthService implements IAuthService {
         throw new AuthenticationError('Invalid credentials');
       }
 
+      // Google OAuth users cannot login with password
+      if (!dbUser.passwordHash) {
+        throw new AuthenticationError('Invalid credentials');
+      }
+
       // Verify password
       const isValidPassword = await verifyPassword(password, dbUser.passwordHash);
       if (!isValidPassword) {
         throw new AuthenticationError('Invalid credentials');
       }
 
-      // Convert database user to application user type
-      const user: User = {
-        id: dbUser.id,
-        email: dbUser.email,
-        passwordHash: dbUser.passwordHash,
-        subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
-        createdAt: dbUser.createdAt,
-        updatedAt: dbUser.updatedAt
-      };
+      const user = this.dbUserToUser(dbUser);
 
       // Generate JWT token
       const token = generateToken({
@@ -170,17 +188,7 @@ export class AuthService implements IAuthService {
         throw new AuthenticationError('User not found');
       }
 
-      // Convert database user to application user type
-      const user: User = {
-        id: dbUser.id,
-        email: dbUser.email,
-        passwordHash: dbUser.passwordHash,
-        subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
-        createdAt: dbUser.createdAt,
-        updatedAt: dbUser.updatedAt
-      };
-
-      return user;
+      return this.dbUserToUser(dbUser);
     } catch (error) {
       if (error instanceof AuthenticationError) {
         throw error;
@@ -255,14 +263,7 @@ export class AuthService implements IAuthService {
         return null;
       }
 
-      return {
-        id: dbUser.id,
-        email: dbUser.email,
-        passwordHash: dbUser.passwordHash,
-        subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
-        createdAt: dbUser.createdAt,
-        updatedAt: dbUser.updatedAt
-      };
+      return this.dbUserToUser(dbUser);
     } catch (error) {
       throw new AuthenticationError('Failed to get user', { error: (error as Error).message });
     }
@@ -278,17 +279,193 @@ export class AuthService implements IAuthService {
         data: { subscriptionTier: tier }
       });
 
-      return {
-        id: dbUser.id,
-        email: dbUser.email,
-        passwordHash: dbUser.passwordHash,
-        subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
-        createdAt: dbUser.createdAt,
-        updatedAt: dbUser.updatedAt
-      };
+      return this.dbUserToUser(dbUser);
     } catch (error) {
       throw new AuthenticationError('Failed to update subscription tier', { error: (error as Error).message });
     }
+  }
+
+  /**
+   * Login or register with Google ID token
+   * Verifies the token, then creates or finds user
+   */
+  async loginWithGoogle(idToken: string): Promise<{ user: User; token: string }> {
+    if (!this.googleClientId) {
+      throw new AuthenticationError('Google Sign-In is not configured');
+    }
+
+    const client = new OAuth2Client(this.googleClientId);
+    let payload;
+
+    try {
+      const ticket = await client.verifyIdToken({
+        idToken,
+        audience: this.googleClientId
+      });
+      payload = ticket.getPayload();
+    } catch (error) {
+      throw new AuthenticationError('Invalid Google token', { error: (error as Error).message });
+    }
+
+    if (!payload || !payload.email) {
+      throw new AuthenticationError('Invalid Google token: missing email');
+    }
+
+    const email = payload.email.toLowerCase();
+    const googleId = payload.sub;
+
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ email }, { googleId }]
+      }
+    });
+
+    if (existingUser) {
+      if (existingUser.authProvider === 'local') {
+        throw new AuthenticationError(
+          'An account with this email already exists. Please sign in with your password.'
+        );
+      }
+      const user = this.dbUserToUser(existingUser);
+      const token = generateToken({
+        userId: user.id,
+        email: user.email,
+        subscriptionTier: user.subscriptionTier
+      });
+      return { user, token };
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const dbUser = await tx.user.create({
+        data: {
+          email,
+          passwordHash: null,
+          authProvider: 'google',
+          googleId,
+          subscriptionTier: SubscriptionTier.FREE
+        }
+      });
+
+      await tx.userProfile.create({
+        data: {
+          userId: dbUser.id,
+          aiAttributes: {},
+          extractedSkills: []
+        }
+      });
+
+      const user = this.dbUserToUser(dbUser);
+      const token = generateToken({
+        userId: user.id,
+        email: user.email,
+        subscriptionTier: user.subscriptionTier
+      });
+      return { user, token };
+    });
+
+    return result;
+  }
+
+  /**
+   * Request password reset - sends OTP to email if user exists
+   * Always returns same response for security (no email enumeration)
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    });
+
+    if (!user) {
+      return;
+    }
+
+    if (user.authProvider !== 'local' || !user.passwordHash) {
+      return;
+    }
+
+    if (!this.emailService?.isConfigured()) {
+      throw new ValidationError(
+        'Email service is not configured. Please contact support.'
+      );
+    }
+
+    const otp = this.generateOTP();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+    await this.prisma.passwordResetOTP.create({
+      data: {
+        email: normalizedEmail,
+        otpHash,
+        expiresAt
+      }
+    });
+
+    await this.emailService.sendOTP(normalizedEmail, otp);
+  }
+
+  /**
+   * Verify OTP and return reset token
+   */
+  async verifyOTP(email: string, otp: string): Promise<{ resetToken: string }> {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const records = await this.prisma.passwordResetOTP.findMany({
+      where: { email: normalizedEmail },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    for (const record of records) {
+      if (new Date() > record.expiresAt) continue;
+
+      const isValid = await verifyPassword(otp, record.otpHash);
+      if (isValid) {
+        await this.prisma.passwordResetOTP.deleteMany({
+          where: { email: normalizedEmail }
+        });
+        const resetToken = generateResetToken(normalizedEmail);
+        return { resetToken };
+      }
+    }
+
+    throw new AuthenticationError('Invalid or expired OTP');
+  }
+
+  /**
+   * Reset password using reset token
+   */
+  async resetPassword(resetToken: string, newPassword: string): Promise<void> {
+    const payload = validateResetToken(resetToken);
+    validatePassword(newPassword);
+
+    const passwordHash = await hashPassword(newPassword);
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: payload.email }
+    });
+
+    if (!user) {
+      throw new AuthenticationError('User not found');
+    }
+
+    if (user.authProvider !== 'local') {
+      throw new AuthenticationError('Password reset is not available for Google accounts');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash }
+    });
+  }
+
+  private generateOTP(): string {
+    let otp = '';
+    for (let i = 0; i < OTP_LENGTH; i++) {
+      otp += Math.floor(Math.random() * 10).toString();
+    }
+    return otp;
   }
 }
 

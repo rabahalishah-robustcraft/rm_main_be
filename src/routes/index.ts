@@ -51,10 +51,14 @@ export function createApiRoutes(services: ServiceContainer): Router {
         auth: {
           'POST /api/auth/register': 'Register a new user',
           'POST /api/auth/login': 'Login user',
+          'POST /api/auth/google': 'Continue with Google (ID token)',
           'POST /api/auth/logout': 'Logout user',
           'GET /api/auth/me': 'Get current user info',
           'POST /api/auth/refresh': 'Refresh JWT token',
-          'GET /api/auth/validate': 'Validate JWT token'
+          'GET /api/auth/validate': 'Validate JWT token',
+          'POST /api/auth/forgot-password': 'Request password reset OTP',
+          'POST /api/auth/verify-otp': 'Verify OTP, get reset token',
+          'POST /api/auth/reset-password': 'Reset password with reset token'
         },
         profile: {
           'GET /api/profile': 'Get user profile',

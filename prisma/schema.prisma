@@ -13,7 +13,9 @@ datasource db {
 model User {
   id               String    @id @default(cuid())
   email            String    @unique
-  passwordHash     String
+  passwordHash     String?   // nullable for Google OAuth users
+  authProvider     String    @default("local") // "local" | "google"
+  googleId         String?   @unique // Google sub claim, for linking
   subscriptionTier String    @default("free")
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -24,6 +26,17 @@ model User {
   usageTracking  UsageTracking[]
 
   @@map("users")
+}
+
+model PasswordResetOTP {
+  id        String   @id @default(cuid())
+  email     String
+  otpHash   String   // bcrypt hash of OTP
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, expiresAt])
+  @@map("password_reset_otps")
 }
 
 model UserProfile {

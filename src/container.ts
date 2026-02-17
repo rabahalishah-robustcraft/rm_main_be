@@ -9,6 +9,7 @@ import { config } from './utils/config';
 
 // Import all services
 import { AuthService } from './services/AuthService';
+import { createEmailService } from './services/EmailService';
 import { ProfileService } from './services/ProfileService';
 import { AudioSessionService } from './services/AudioSessionService';
 import { SubscriptionService } from './services/SubscriptionService';
@@ -90,12 +91,23 @@ class Container {
     const openaiService = new OpenAIService(openaiConfig);
     console.log('✅ OpenAI service initialized');
 
+    // Initialize Email Service (optional - for password reset)
+    const emailService = createEmailService({
+      resendApiKey: config.RESEND_API_KEY,
+      fromAddress: config.EMAIL_FROM_ADDRESS || 'noreply@example.com',
+      fromName: config.EMAIL_FROM_NAME || 'Your App'
+    });
+
     // Initialize Error Handling Service
     const errorHandlingService = ErrorHandlingService.getInstance();
     console.log('✅ Error handling service initialized');
 
     // Initialize core business services with dependencies
-    const authService = new AuthService(prisma);
+    const authService = new AuthService(
+      prisma,
+      emailService,
+      config.GOOGLE_CLIENT_ID
+    );
     const subscriptionService = new SubscriptionService(prisma);
     const dashboardService = new DashboardService(prisma);
     const profileService = new ProfileService(s3Service, openaiService, prisma);
