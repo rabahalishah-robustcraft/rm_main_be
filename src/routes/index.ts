@@ -58,7 +58,9 @@ export function createApiRoutes(services: ServiceContainer): Router {
           'GET /api/auth/validate': 'Validate JWT token',
           'POST /api/auth/forgot-password': 'Request password reset OTP',
           'POST /api/auth/verify-otp': 'Verify OTP, get reset token',
-          'POST /api/auth/reset-password': 'Reset password with reset token'
+          'POST /api/auth/reset-password': 'Reset password with reset token',
+          'POST /api/auth/change-password': 'Change password (authenticated)',
+          'POST /api/auth/change-email': 'Change email (authenticated, password required)'
         },
         profile: {
           'GET /api/profile': 'Get user profile',
@@ -72,6 +74,8 @@ export function createApiRoutes(services: ServiceContainer): Router {
         sessions: {
           'POST /api/sessions/start': 'Start a new audio session',
           'POST /api/sessions/:id/audio': 'Upload audio to session',
+          'PATCH /api/sessions/:id/transcript': 'Update transcript and resubmit for insights',
+          'PATCH /api/sessions/:id': 'Update session display name (event label)',
           'GET /api/sessions/:id': 'Get session details',
           'GET /api/sessions/history': 'Get session history'
         },

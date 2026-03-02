@@ -7,6 +7,7 @@ import { aiProcessingRateLimit, uploadRateLimit } from '../middleware/rateLimiti
 import { validateRequest, validationSchemas } from '../middleware/validation';
 import { AudioSessionError } from '../services/AudioSessionService';
 import { config } from '../utils/config';
+import { formatSessionDisplayName } from '../utils/sessionDisplayName';
 
 /**
  * Audio Session Routes
@@ -226,6 +227,7 @@ router.get('/history',
 
     const formattedSessions = sessions.map(session => ({
       id: session.id,
+      displayName: session.displayName ?? formatSessionDisplayName(session.createdAt),
       status: session.status,
       scores: {
         clarity: session.clarityScore,
@@ -264,6 +266,126 @@ router.get('/history',
       error: {
         code: 'INTERNAL_ERROR',
         message: 'Failed to retrieve session history'
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    });
+    return;
+  }
+});
+
+/**
+ * Update transcript and resubmit for insights
+ * PATCH /api/sessions/:id/transcript
+ * Body: { transcript: string }
+ */
+router.patch('/:id/transcript',
+  authenticate,
+  enforceDataIsolation('session'),
+  validateRequest(validationSchemas.sessions.updateTranscript),
+  aiProcessingRateLimit,
+  async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = req.params.id;
+    const userId = req.user!.id;
+    const { transcript } = req.body;
+
+    const session = await audioSessionService.updateTranscriptAndReanalyze(sessionId, userId, transcript);
+
+    res.status(200).json({
+      success: true,
+      message: 'Transcript updated and analysis completed',
+      data: {
+        id: session.id,
+        status: session.status,
+        transcript: session.transcript,
+        aiAnalysis: session.aiAnalysis,
+        scores: {
+          clarity: session.clarityScore,
+          confidence: session.confidenceScore,
+          tone: session.toneScore,
+          enthusiasm: session.enthusiasmScore,
+          specificity: session.specificityScore
+        },
+        updatedAt: session.updatedAt
+      }
+    });
+    return;
+  } catch (error) {
+    if (error instanceof AudioSessionError) {
+      const statusCode = error.code === 'SESSION_NOT_FOUND' ? 404 :
+                        error.code === 'SESSION_ACCESS_DENIED' ? 403 : 400;
+      return res.status(statusCode).json({
+        error: {
+          code: error.code,
+          message: error.message
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+    console.error('Transcript update error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to update transcript and re-analyze'
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path
+    });
+    return;
+  }
+});
+
+/**
+ * Update session display name (event label)
+ * PATCH /api/sessions/:id
+ * Body: { displayName?: string }
+ */
+router.patch('/:id',
+  authenticate,
+  enforceDataIsolation('session'),
+  validateRequest(validationSchemas.sessions.updateDisplayName),
+  async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionId = req.params.id;
+    const userId = req.user!.id;
+    const { displayName } = req.body;
+
+    const session = await audioSessionService.updateSessionDisplayName(
+      sessionId,
+      userId,
+      displayName === undefined ? undefined : (displayName === '' ? null : displayName)
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Session display name updated',
+      data: {
+        id: session.id,
+        displayName: session.displayName ?? null,
+        updatedAt: session.updatedAt
+      }
+    });
+    return;
+  } catch (error) {
+    if (error instanceof AudioSessionError) {
+      const statusCode = error.code === 'SESSION_NOT_FOUND' ? 404 :
+                        error.code === 'SESSION_ACCESS_DENIED' ? 403 : 400;
+      return res.status(statusCode).json({
+        error: {
+          code: error.code,
+          message: error.message
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+    console.error('Display name update error:', error);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to update session display name'
       },
       timestamp: new Date().toISOString(),
       path: req.path
@@ -314,6 +436,7 @@ router.get('/:id',
       success: true,
       data: {
         id: session.id,
+        displayName: session.displayName ?? null,
         status: session.status,
         transcript: session.transcript,
         aiAnalysis: session.aiAnalysis,

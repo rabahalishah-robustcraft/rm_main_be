@@ -133,6 +133,29 @@ export const validationSchemas = {
           'any.required': 'New password is required'
         })
       })
+    },
+    changePassword: {
+      body: Joi.object({
+        currentPassword: Joi.string().required().messages({
+          'any.required': 'Current password is required'
+        }),
+        newPassword: Joi.string().min(8).pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/).required().messages({
+          'string.min': 'New password must be at least 8 characters long',
+          'string.pattern.base': 'New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+          'any.required': 'New password is required'
+        })
+      })
+    },
+    changeEmail: {
+      body: Joi.object({
+        newEmail: Joi.string().email().required().messages({
+          'string.email': 'Must be a valid email address',
+          'any.required': 'New email is required'
+        }),
+        password: Joi.string().required().messages({
+          'any.required': 'Password is required to verify your identity'
+        })
+      })
     }
   },
 
@@ -168,6 +191,31 @@ export const validationSchemas = {
           'any.required': 'Session ID is required'
         })
       })
+    },
+    updateTranscript: {
+      params: Joi.object({
+        id: Joi.string().pattern(/^c[a-z0-9]{24}$/).required().messages({
+          'string.pattern.base': 'Session ID must be a valid CUID',
+          'any.required': 'Session ID is required'
+        })
+      }),
+      body: Joi.object({
+        transcript: Joi.string().min(1).max(50000).trim().required().messages({
+          'string.min': 'Transcript cannot be empty',
+          'any.required': 'Transcript is required'
+        })
+      })
+    },
+    updateDisplayName: {
+      params: Joi.object({
+        id: Joi.string().pattern(/^c[a-z0-9]{24}$/).required().messages({
+          'string.pattern.base': 'Session ID must be a valid CUID',
+          'any.required': 'Session ID is required'
+        })
+      }),
+      body: Joi.object({
+        displayName: Joi.string().max(200).trim().allow('').optional()
+      }).min(1)
     },
     history: {
       query: Joi.object({

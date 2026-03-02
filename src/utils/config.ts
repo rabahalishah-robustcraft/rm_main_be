@@ -44,7 +44,7 @@ const configSchema = Joi.object({
   RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(60000), // 1 minute
   RATE_LIMIT_MAX_REQUESTS: Joi.number().integer().min(1).default(100),
   AUTH_RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(900000), // 15 minutes
-  AUTH_RATE_LIMIT_MAX_ATTEMPTS: Joi.number().integer().min(1).default(5),
+  AUTH_RATE_LIMIT_MAX_ATTEMPTS: Joi.number().integer().min(1).default(10), // Increased from 5 to 10 attempts per window
   
   // File Upload Configuration
   MAX_FILE_SIZE: Joi.number().integer().min(1).default(50 * 1024 * 1024), // 50MB

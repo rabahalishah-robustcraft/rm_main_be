@@ -40,6 +40,8 @@ export interface UserContext {
     industry: string;
     jobTitle: string;
   };
+  /** Optional summary of past sessions for context-aware analysis (DB retrieval of past events) */
+  pastSessionsSummary?: string;
 }
 
 export interface ResumeData {
@@ -570,6 +572,16 @@ export class OpenAIService {
       jobTitle: profile.targetJobTitle || 'Software Engineer'
     };
 
+    const pastSessionsBlock = userContext.pastSessionsSummary
+      ? `
+
+PAST SESSIONS (for context on this candidate's progress and recurring themes):
+${userContext.pastSessionsSummary}
+
+Use this context to note trends, recurring strengths or improvement areas, and progress over time where relevant.
+`
+      : '';
+
     return `
 Analyze this interview response for a ${targetRole.jobTitle} position in ${targetRole.industry}:
 
@@ -579,6 +591,7 @@ USER CONTEXT:
 - Target Role: ${targetRole.jobTitle} in ${targetRole.industry}
 - Skills: ${profile.extractedSkills?.join(', ') || 'Not specified'}
 - Experience Level: ${profile.experienceLevel || 'Not specified'}
+${pastSessionsBlock}
 
 Please provide analysis in this exact JSON format:
 {

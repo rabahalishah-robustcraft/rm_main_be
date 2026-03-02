@@ -460,6 +460,84 @@ export class AuthService implements IAuthService {
     });
   }
 
+  /**
+   * Change password for authenticated user (current password required).
+   * Profile settings: edit password.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!dbUser) {
+      throw new AuthenticationError('User not found');
+    }
+
+    if (dbUser.authProvider !== 'local' || !dbUser.passwordHash) {
+      throw new AuthenticationError('Password change is not available for this account');
+    }
+
+    const isValid = await verifyPassword(currentPassword, dbUser.passwordHash);
+    if (!isValid) {
+      throw new AuthenticationError('Current password is incorrect');
+    }
+
+    validatePassword(newPassword);
+    const passwordHash = await hashPassword(newPassword);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash }
+    });
+  }
+
+  /**
+   * Change email for authenticated user (current password required for verification).
+   * Profile settings: edit email.
+   */
+  async changeEmail(userId: string, newEmail: string, password: string): Promise<User> {
+    const normalizedNewEmail = newEmail.toLowerCase().trim();
+
+    if (!normalizedNewEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedNewEmail)) {
+      throw new ValidationError('Invalid email format');
+    }
+
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!dbUser) {
+      throw new AuthenticationError('User not found');
+    }
+
+    if (dbUser.authProvider !== 'local' || !dbUser.passwordHash) {
+      throw new AuthenticationError('Email change requires password verification. Use your account password.');
+    }
+
+    const isValid = await verifyPassword(password, dbUser.passwordHash);
+    if (!isValid) {
+      throw new AuthenticationError('Password is incorrect');
+    }
+
+    const existing = await this.prisma.user.findUnique({
+      where: { email: normalizedNewEmail }
+    });
+    if (existing && existing.id !== userId) {
+      throw new ValidationError('An account with this email already exists');
+    }
+
+    if (normalizedNewEmail === dbUser.email.toLowerCase()) {
+      return this.dbUserToUser(dbUser);
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { email: normalizedNewEmail }
+    });
+
+    return this.dbUserToUser(updated);
+  }
+
   private generateOTP(): string {
     let otp = '';
     for (let i = 0; i < OTP_LENGTH; i++) {

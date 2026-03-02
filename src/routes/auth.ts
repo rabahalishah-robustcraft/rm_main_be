@@ -235,6 +235,49 @@ export function createAuthRoutes(services: ServiceContainer): Router {
   );
 
   /**
+   * Change password (authenticated user). Profile settings: edit password.
+   * POST /api/auth/change-password
+   */
+  router.post('/change-password',
+    authenticate,
+    authRateLimit,
+    validateRequest(validationSchemas.auth.changePassword),
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const userId = req.user!.id;
+      const { currentPassword, newPassword } = req.body;
+
+      await authService.changePassword(userId, currentPassword, newPassword);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Password changed successfully'
+      });
+    })
+  );
+
+  /**
+   * Change email (authenticated user). Profile settings: edit email.
+   * POST /api/auth/change-email
+   */
+  router.post('/change-email',
+    authenticate,
+    authRateLimit,
+    validateRequest(validationSchemas.auth.changeEmail),
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const userId = req.user!.id;
+      const { newEmail, password } = req.body;
+
+      const user = await authService.changeEmail(userId, newEmail, password);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Email updated successfully',
+        user: toSafeUser(user)
+      });
+    })
+  );
+
+  /**
    * Validate JWT token
    * GET /api/auth/validate
    * Requirements: 1.3, 9.2

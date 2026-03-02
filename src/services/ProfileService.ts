@@ -687,34 +687,17 @@ export class ProfileService implements IProfileService {
    * Validate target role against available industry and job title combinations
    * Requirements: 2.3
    * 
-   * Note: This validation is now relaxed to support career switchers.
-   * Users can select any industry and job title combination, even if
-   * the job title is not in the predefined list for that industry.
+   * Note: No validation needed - allow any industry and job title combination.
+   * This provides maximum flexibility for users with unique career paths,
+   * emerging industries, or career switchers.
+   * Industry and job title are stored as free-form text fields.
    */
   private async validateTargetRole(industry?: string | null, jobTitle?: string | null): Promise<void> {
-    if (!industry || !jobTitle) {
-      return; // Allow partial updates
-    }
-
-    try {
-      // Only validate that the industry exists in the database
-      // Don't restrict job titles to predefined lists - allow career switchers
-      const dbIndustry = await this.prisma.industry.findUnique({
-        where: { name: industry }
-      });
-
-      if (!dbIndustry) {
-        throw new ValidationError(`Invalid industry: ${industry}`);
-      }
-
-      // Allow any job title - users may be switching careers or have unique roles
-      // No validation needed for job title
-    } catch (error) {
-      if (error instanceof ValidationError) {
-        throw error;
-      }
-      throw new ExternalServiceError('Failed to validate target role', { error: (error as Error)?.message || String(error) || 'Unknown error' });
-    }
+    // No validation needed - allow any industry and job title combination
+    // This provides maximum flexibility for users with unique career paths,
+    // emerging industries, or career switchers
+    // Industry and job title are stored as free-form text fields
+    return;
   }
 
   /**

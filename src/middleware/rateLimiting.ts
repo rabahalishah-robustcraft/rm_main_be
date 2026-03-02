@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { config } from '../utils/config';
 
 interface RateLimitConfig {
   windowMs: number;
@@ -123,10 +124,11 @@ function getClientIdentifier(req: Request): string {
 
 /**
  * Strict rate limiting for authentication endpoints
+ * Uses config values: AUTH_RATE_LIMIT_WINDOW_MS and AUTH_RATE_LIMIT_MAX_ATTEMPTS
  */
 export const authRateLimit = createRateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  maxRequests: 5, // 5 attempts per window
+  windowMs: config.AUTH_RATE_LIMIT_WINDOW_MS, // Default: 15 minutes (900000ms)
+  maxRequests: config.AUTH_RATE_LIMIT_MAX_ATTEMPTS, // Default: 10 attempts per window
   message: 'Too many authentication attempts. Please try again later.'
 });
 

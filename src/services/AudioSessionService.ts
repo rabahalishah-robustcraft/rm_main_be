@@ -3,6 +3,7 @@ import { OpenAIService, AIAnalysis, UserContext } from './OpenAIService';
 import { S3Service } from './S3Service';
 import { SubscriptionService, SubscriptionError } from './SubscriptionService';
 import { sanitizeFilename } from '../utils/fileUpload';
+import { formatSessionDisplayName } from '../utils/sessionDisplayName';
 
 /**
  * Audio Session Service for managing recording sessions and AI analysis
@@ -81,11 +82,13 @@ export class AudioSessionService {
       await this.subscriptionService.validateUsageLimit(userId);
 
       // Create new session with pending status
+      const now = new Date();
       const session = await this.prisma.audioSession.create({
         data: {
           userId,
           audioS3Key: '', // Will be set when audio is uploaded
-          status: SessionStatus.PENDING
+          status: SessionStatus.PENDING,
+          displayName: formatSessionDisplayName(now)
         }
       });
 
@@ -194,7 +197,8 @@ export class AudioSessionService {
 
       console.log(`Transcription completed for session ${sessionId}`);
 
-      // Step 2: Analyze response using GPT with user context
+      // Step 2: Analyze response using GPT with user context and past sessions summary
+      const pastSessionsSummary = await this.getPastSessionsSummary(session.userId, sessionId, 5);
       const userContext: UserContext = {
         profile: session.user.profile!,
         targetRole: session.user.profile?.targetIndustry && session.user.profile?.targetJobTitle
@@ -202,7 +206,8 @@ export class AudioSessionService {
               industry: session.user.profile.targetIndustry,
               jobTitle: session.user.profile.targetJobTitle
             }
-          : undefined
+          : undefined,
+        pastSessionsSummary: pastSessionsSummary || undefined
       };
 
       console.log(`Starting AI analysis for session ${sessionId}`);
@@ -310,7 +315,8 @@ export class AudioSessionService {
         data: { transcript: transcriptionResult.text }
       });
 
-      // Step 2: Analyze response using GPT with user context
+      // Step 2: Analyze response using GPT with user context and past sessions summary
+      const pastSessionsSummary = await this.getPastSessionsSummary(session.userId, sessionId, 5);
       const userContext: UserContext = {
         profile: session.user.profile!,
         targetRole: session.user.profile?.targetIndustry && session.user.profile?.targetJobTitle
@@ -318,7 +324,8 @@ export class AudioSessionService {
               industry: session.user.profile.targetIndustry,
               jobTitle: session.user.profile.targetJobTitle
             }
-          : undefined
+          : undefined,
+        pastSessionsSummary: pastSessionsSummary || undefined
       };
 
       const analysis = await this.openaiService.analyzeResponse(
@@ -358,6 +365,95 @@ export class AudioSessionService {
         error as Error
       );
     }
+  }
+
+  /**
+   * Update transcript and re-run AI analysis (edit transcript and resubmit for insights).
+   * Does not increment usage count (same event).
+   */
+  async updateTranscriptAndReanalyze(sessionId: string, userId: string, transcript: string): Promise<SessionWithAnalysis> {
+    const session = await this.prisma.audioSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        user: {
+          include: { profile: true }
+        }
+      }
+    });
+
+    if (!session) {
+      throw new AudioSessionError('Session not found', 'SESSION_NOT_FOUND');
+    }
+
+    if (session.userId !== userId) {
+      throw new AudioSessionError('You do not have access to this session', 'SESSION_ACCESS_DENIED');
+    }
+
+    // Allow re-analysis for completed or failed sessions (user correcting transcript)
+    if (session.status !== SessionStatus.COMPLETED && session.status !== SessionStatus.FAILED) {
+      throw new AudioSessionError(
+        'Session must be completed or failed to update transcript and re-analyze',
+        'INVALID_SESSION_STATE'
+      );
+    }
+
+    if (!session.user.profile) {
+      throw new AudioSessionError('User profile not found', 'USER_NOT_FOUND');
+    }
+
+    await this.prisma.audioSession.update({
+      where: { id: sessionId },
+      data: { transcript }
+    });
+
+    const pastSessionsSummary = await this.getPastSessionsSummary(session.userId, sessionId, 5);
+    const userContext: UserContext = {
+      profile: session.user.profile,
+      targetRole: session.user.profile.targetIndustry && session.user.profile.targetJobTitle
+        ? {
+            industry: session.user.profile.targetIndustry,
+            jobTitle: session.user.profile.targetJobTitle
+          }
+        : undefined,
+      pastSessionsSummary: pastSessionsSummary || undefined
+    };
+
+    const analysis = await this.openaiService.analyzeResponse(transcript, userContext);
+    await this.updateSessionWithAnalysis(sessionId, analysis);
+    await this.updateUserAIAttributes(session.userId, analysis.aiAttributes);
+
+    await this.prisma.audioSession.update({
+      where: { id: sessionId },
+      data: { status: SessionStatus.COMPLETED }
+    });
+
+    const updated = await this.getSession(sessionId);
+    if (!updated) {
+      throw new AudioSessionError('Failed to retrieve updated session', 'SESSION_RETRIEVAL_FAILED');
+    }
+    return updated;
+  }
+
+  /**
+   * Update session display name (event label) for user-editable event naming.
+   */
+  async updateSessionDisplayName(sessionId: string, userId: string, displayName: string | null): Promise<AudioSession> {
+    const session = await this.prisma.audioSession.findUnique({
+      where: { id: sessionId }
+    });
+
+    if (!session) {
+      throw new AudioSessionError('Session not found', 'SESSION_NOT_FOUND');
+    }
+
+    if (session.userId !== userId) {
+      throw new AudioSessionError('You do not have access to this session', 'SESSION_ACCESS_DENIED');
+    }
+
+    return this.prisma.audioSession.update({
+      where: { id: sessionId },
+      data: { displayName: displayName && displayName.trim() ? displayName.trim() : null }
+    });
   }
 
   /**
@@ -460,6 +556,39 @@ export class AudioSessionService {
         ...scores
       }
     });
+  }
+
+  /**
+   * Build a short summary of past sessions for inclusion in the analysis prompt (DB retrieval of past events).
+   */
+  private async getPastSessionsSummary(userId: string, excludeSessionId: string | null, limit: number = 5): Promise<string> {
+    const where: any = { userId, status: SessionStatus.COMPLETED };
+    if (excludeSessionId) {
+      where.id = { not: excludeSessionId };
+    }
+    const pastSessions = await this.prisma.audioSession.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit
+    });
+
+    if (pastSessions.length === 0) {
+      return '';
+    }
+
+    return pastSessions
+      .map(s => {
+        const date = s.createdAt.toISOString().split('T')[0];
+        const scores = [s.clarityScore, s.confidenceScore, s.toneScore, s.enthusiasmScore, s.specificityScore]
+          .filter((n): n is number => n != null);
+        const overall = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+        const insights =
+          (s.aiAnalysis as any)?.insights != null && Array.isArray((s.aiAnalysis as any).insights)
+            ? (s.aiAnalysis as any).insights.slice(0, 2).join('; ')
+            : 'N/A';
+        return `- ${date}: overall ~${Math.round(overall)}, insights: ${insights}`;
+      })
+      .join('\n');
   }
 
   /**
