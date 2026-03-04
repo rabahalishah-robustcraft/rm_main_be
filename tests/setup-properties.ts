@@ -25,7 +25,7 @@ export const arbitraries = {
   sessionId: () => fc.constantFrom(
     'sess123456789', 'audio987654321', 'rec456789012', 'session345678901'
   ),
-  score: () => fc.integer({ min: 0, max: 100 }),
+  score: () => fc.integer({ min: 1, max: 5 }),
   subscriptionTier: () => fc.constantFrom('free', 'paid'),
   industry: () => fc.constantFrom('Technology', 'Finance', 'Healthcare', 'Consulting'),
   jobTitle: () => fc.constantFrom(

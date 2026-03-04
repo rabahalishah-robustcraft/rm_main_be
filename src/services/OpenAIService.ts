@@ -31,6 +31,16 @@ export interface AIAnalysis {
     specificity: number;
   };
   insights: string[];
+  /** Strength Areas: category labels for strengths (e.g. technical, leadership, communication). */
+  strengthAreas?: string[];
+  /** Strength Insights: bullet-point insights describing what the candidate did well. */
+  strengthInsights?: string[];
+  /** Opportunity Areas: category labels for areas to improve (e.g. structure, specificity, examples). */
+  opportunityAreas?: string[];
+  /** Specific observations explaining what needs improvement and why (actionable details). */
+  opportunityInsights?: string[];
+  /** Top 2–3 positive traits with bullet-point style descriptions based on the response. */
+  topTraits?: string[];
   aiAttributes: Record<string, any>;
 }
 
@@ -343,7 +353,7 @@ export class OpenAIService {
             messages: [
               {
                 role: 'system',
-                content: 'You are an expert interview coach providing detailed feedback on interview responses. Analyze the response and provide scores (0-100) and actionable insights.'
+                content: 'You are an expert interview coach and career advisor. For each response you must return: (1) scores 1–5, (2) feedback and general insights, (3) Strength Areas and Strength Insights, (4) Opportunity Areas and Opportunity Insights, and (5) top traits. Strength Areas = category labels for strengths; Strength Insights = bullet insights on what they did well; Opportunity Areas = category labels for improvement; Opportunity Insights = specific observations on what needs improvement and why (actionable details). Always write all feedback, insights, strengthInsights, opportunityInsights, and topTraits in second person ("you", "your") as if talking directly to the candidate. Never use the candidate\'s name or third person (e.g. avoid "Henry should"); use "You should", "Your response", "Consider adding", etc. Use a warm, human-like tone—a supportive coach talking to the person, not a report about them.'
               },
               {
                 role: 'user',
@@ -583,7 +593,7 @@ Use this context to note trends, recurring strengths or improvement areas, and p
       : '';
 
     return `
-Analyze this interview response for a ${targetRole.jobTitle} position in ${targetRole.industry}:
+Analyze this interview response for a ${targetRole.jobTitle} position in ${targetRole.industry}. Address the candidate directly using "you" and "your" in all feedback, insights, strengthInsights, opportunityInsights, and topTraits. Use a warm, human-like tone as if you are their coach talking to them.
 
 TRANSCRIPT: "${transcript}"
 
@@ -595,27 +605,50 @@ ${pastSessionsBlock}
 
 Please provide analysis in this exact JSON format:
 {
-  "feedback": "Detailed feedback paragraph about the response quality and content",
+  "feedback": "Detailed feedback paragraph about the response quality and content, addressing the candidate with you/your",
   "scores": {
-    "clarity": 85,
-    "confidence": 78,
-    "tone": 92,
-    "enthusiasm": 88,
-    "specificity": 75
+    "clarity": 4,
+    "confidence": 4,
+    "tone": 5,
+    "enthusiasm": 4,
+    "specificity": 3
   },
   "insights": [
-    "Specific insight about what was done well",
-    "Specific area for improvement",
-    "Actionable recommendation"
+    "You clearly articulated your background and goals",
+    "You could add more specific examples to strengthen impact",
+    "Consider aligning your examples more closely with the target role"
+  ],
+  "strengthAreas": ["technical", "leadership", "communication", "problem-solving"],
+  "strengthInsights": [
+    "You clearly articulated your background and goals",
+    "You demonstrated relevant experience with concrete examples",
+    "Your delivery was confident and structured"
+  ],
+  "opportunityAreas": ["structure", "specificity", "examples", "public-speaking"],
+  "opportunityInsights": [
+    "You could add specific examples of projects or outcomes to strengthen impact",
+    "Clarifying constraints or scope before diving into details would improve your structure",
+    "More concrete metrics or results would strengthen your response"
+  ],
+  "topTraits": [
+    "Clear communicator – you introduced your background and goals concisely",
+    "Technical depth – you demonstrated hands-on experience with relevant systems",
+    "Goal-oriented – you stated your target role and linked it to experience"
   ],
   "aiAttributes": {
-    "communicationStyle": "detailed|concise|storytelling",
-    "strengthAreas": ["technical", "leadership", "problem-solving"],
-    "improvementAreas": ["public-speaking", "structure", "examples"]
+    "communicationStyle": "detailed|concise|storytelling"
   }
 }
 
-Ensure all scores are between 0-100 and insights are specific and actionable.
+Rules:
+- Scores: integers 1–5 (inclusive) for each category.
+- insights: general bullet-style observations and recommendations.
+- Strength Areas (strengthAreas): 3–5 category labels for strengths (e.g. technical, leadership, communication, problem-solving).
+- Strength Insights (strengthInsights): 2–4 bullet-point insights describing what the candidate did well; strength-based only.
+- Opportunity Areas (opportunityAreas): 3–5 category labels for areas to improve (e.g. structure, specificity, examples, public-speaking).
+- Opportunity Insights (opportunityInsights): 2–4 specific observations explaining what needs improvement and why; actionable details (e.g. where a better approach was possible, what was missing, what to refine).
+- topTraits: exactly 2–3 top positive traits, each as a short bullet (e.g. "Strong technical communication – you explained concepts clearly").
+- Tone: second person only (you/your). Direct address to the candidate; never use their name or third person. Human-like, supportive coach voice.
 `;
   }
 
@@ -673,14 +706,48 @@ Focus on extracting:
         throw new Error('Missing required fields in analysis response');
       }
 
-      // Validate scores are in range 0-100
-      const scores = parsed.scores;
-      const scoreFields = ['clarity', 'confidence', 'tone', 'enthusiasm', 'specificity'];
-      for (const field of scoreFields) {
-        if (typeof scores[field] !== 'number' || scores[field] < 0 || scores[field] > 100) {
-          throw new Error(`Invalid score for ${field}: ${scores[field]}`);
-        }
-      }
+      // Normalize scores to 1-5 (clamp if LLM returns 0-100 or out of range)
+      const scoreFields = ['clarity', 'confidence', 'tone', 'enthusiasm', 'specificity'] as const;
+      const clampScore = (n: unknown): number => {
+        const num = typeof n === 'number' && !Number.isNaN(n) ? n : 0;
+        return Math.max(1, Math.min(5, Math.round(num)));
+      };
+      const scores = {
+        clarity: clampScore(parsed.scores?.clarity),
+        confidence: clampScore(parsed.scores?.confidence),
+        tone: clampScore(parsed.scores?.tone),
+        enthusiasm: clampScore(parsed.scores?.enthusiasm),
+        specificity: clampScore(parsed.scores?.specificity)
+      };
+
+      // Normalize strengthAreas: top-level or aiAttributes.strengthAreas
+      const strengthAreas: string[] = Array.isArray(parsed.strengthAreas)
+        ? parsed.strengthAreas.map((item: unknown) => String(item)).filter(Boolean)
+        : Array.isArray(parsed.aiAttributes?.strengthAreas)
+          ? parsed.aiAttributes.strengthAreas.map((item: unknown) => String(item)).filter(Boolean)
+          : [];
+
+      // Normalize strengthInsights (bullet insights about strengths)
+      const strengthInsights: string[] = Array.isArray(parsed.strengthInsights)
+        ? parsed.strengthInsights.map((item: unknown) => String(item)).filter(Boolean)
+        : [];
+
+      // Normalize opportunityAreas: top-level or aiAttributes.improvementAreas
+      const opportunityAreas: string[] = Array.isArray(parsed.opportunityAreas)
+        ? parsed.opportunityAreas.map((item: unknown) => String(item)).filter(Boolean)
+        : Array.isArray(parsed.aiAttributes?.improvementAreas)
+          ? parsed.aiAttributes.improvementAreas.map((item: unknown) => String(item)).filter(Boolean)
+          : [];
+
+      // Normalize opportunityInsights (improvement-focused observations): use parsed array or []
+      const opportunityInsights: string[] = Array.isArray(parsed.opportunityInsights)
+        ? parsed.opportunityInsights.map((item: unknown) => String(item)).filter(Boolean)
+        : [];
+
+      // Normalize topTraits (2–3 top positive traits as bullet points)
+      const topTraits: string[] = Array.isArray(parsed.topTraits)
+        ? parsed.topTraits.map((item: unknown) => String(item)).filter(Boolean)
+        : [];
 
       return {
         feedback: parsed.feedback,
@@ -692,7 +759,17 @@ Focus on extracting:
           specificity: scores.specificity
         },
         insights: Array.isArray(parsed.insights) ? parsed.insights : [],
-        aiAttributes: parsed.aiAttributes || {}
+        strengthAreas,
+        strengthInsights,
+        opportunityAreas,
+        opportunityInsights,
+        topTraits,
+        aiAttributes: (() => {
+          const attrs = { ...(parsed.aiAttributes || {}) };
+          delete attrs.strengthAreas;
+          delete attrs.improvementAreas;
+          return attrs;
+        })()
       };
     } catch (error) {
       throw new OpenAIServiceError(
@@ -747,8 +824,9 @@ Focus on extracting:
     const hasNumbers = /\d+/.test(transcript);
     const hasConfidentLanguage = /confident|sure|definitely|absolutely/i.test(transcript);
     
-    // Basic scoring based on transcript analysis
-    const baseScore = Math.min(Math.max(wordCount * 2, 30), 85); // 30-85 range based on length
+    // Basic scoring 1-5 based on transcript analysis
+    const baseScore = Math.min(5, Math.max(1, Math.floor(wordCount / 50) + 2)); // 1-5 range based on length
+    const clamp = (n: number) => Math.max(1, Math.min(5, Math.round(n)));
     
     return {
       feedback: `Based on basic analysis: Your response was ${wordCount} words long. ${
@@ -757,21 +835,36 @@ Focus on extracting:
         hasNumbers ? 'Nice inclusion of quantifiable details. ' : 'Try to include more quantifiable details. '
       }Note: This is a simplified analysis due to temporary service limitations.`,
       scores: {
-        clarity: baseScore + (hasSpecificExamples ? 10 : -5),
-        confidence: baseScore + (hasConfidentLanguage ? 15 : -10),
-        tone: baseScore,
-        enthusiasm: baseScore + (transcript.includes('!') ? 5 : -5),
-        specificity: baseScore + (hasNumbers ? 15 : -10)
+        clarity: clamp(baseScore + (hasSpecificExamples ? 1 : -1)),
+        confidence: clamp(baseScore + (hasConfidentLanguage ? 1 : -1)),
+        tone: clamp(baseScore),
+        enthusiasm: clamp(baseScore + (transcript.includes('!') ? 1 : -1)),
+        specificity: clamp(baseScore + (hasNumbers ? 1 : -1))
       },
       insights: [
-        hasSpecificExamples ? 'Good use of concrete examples' : 'Add more specific examples to strengthen your response',
-        wordCount > 100 ? 'Good response length' : 'Consider providing more detailed responses',
+        hasSpecificExamples ? 'You used concrete examples well' : 'Add more specific examples to strengthen your response',
+        wordCount > 100 ? 'Your response length was good' : 'Consider providing more detailed responses',
         'Full AI analysis will be available when service is restored'
       ],
+      strengthAreas: hasSpecificExamples ? ['examples', 'content'] : ['brevity', 'clarity'],
+      strengthInsights: [
+        hasSpecificExamples ? 'You used concrete examples to support your points' : 'You kept your response concise and focused',
+        wordCount > 50 ? 'You provided substantive content' : 'You delivered a clear, direct answer',
+        'Full strength insights will be available when AI analysis is restored'
+      ],
+      opportunityAreas: ['full-analysis-pending'],
+      opportunityInsights: [
+        hasSpecificExamples ? 'Consider adding more concrete metrics or outcomes to demonstrate your impact' : 'Consider adding more specific examples or metrics to strengthen your response',
+        wordCount > 100 ? 'You could refine your structure (opening, key points, closing) for clarity' : 'Consider expanding with a bit more detail while staying concise',
+        'Full opportunity insights will be available when AI analysis is restored'
+      ],
+      topTraits: [
+        hasSpecificExamples ? 'You use concrete examples to support your points' : 'You are concise and direct in communication',
+        wordCount > 50 ? 'You demonstrate ability to elaborate on experience' : 'Your response was clear and focused',
+        'Full top traits will be available when AI analysis is restored'
+      ],
       aiAttributes: {
-        communicationStyle: wordCount > 150 ? 'detailed' : 'concise',
-        strengthAreas: hasSpecificExamples ? ['examples'] : ['brevity'],
-        improvementAreas: ['full-analysis-pending']
+        communicationStyle: wordCount > 150 ? 'detailed' : 'concise'
       }
     };
   }

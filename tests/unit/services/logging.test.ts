@@ -212,13 +212,18 @@ describe('Comprehensive Logging for External API Calls', () => {
         const mockResult = {
           feedback: 'Good response',
           scores: {
-            clarity: 85,
-            confidence: 80,
-            tone: 90,
-            enthusiasm: 85,
-            specificity: 75
+            clarity: 4,
+            confidence: 4,
+            tone: 5,
+            enthusiasm: 4,
+            specificity: 4
           },
           insights: ['Good example', 'Clear structure'],
+          strengthAreas: ['technical', 'communication'],
+          strengthInsights: ['Clear communicator', 'Technical depth'],
+          opportunityAreas: ['structure', 'examples'],
+          opportunityInsights: ['Could add more specific examples', 'Consider clarifying scope or constraints'],
+          topTraits: ['Clear communicator', 'Technical depth'],
           aiAttributes: {}
         };
 

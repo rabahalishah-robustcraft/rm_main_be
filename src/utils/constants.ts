@@ -39,14 +39,14 @@ export const FILE_SIZE_LIMITS = {
   AVATAR: 5 * 1024 * 1024 // 5MB
 } as const;
 
-// Performance score ranges
+// Performance score ranges (1-5 out of 5)
 export const SCORE_RANGES = {
-  MIN: 0,
-  MAX: 100,
-  EXCELLENT: 90,
-  GOOD: 70,
-  FAIR: 50,
-  POOR: 30
+  MIN: 1,
+  MAX: 5,
+  EXCELLENT: 5,
+  GOOD: 4,
+  FAIR: 3,
+  POOR: 2
 } as const;
 
 // Score categories

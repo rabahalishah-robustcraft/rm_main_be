@@ -128,13 +128,18 @@ describe('AI Integration Properties', () => {
                   content: JSON.stringify({
                     feedback: 'Test feedback',
                     scores: {
-                      clarity: 85,
-                      confidence: 78,
-                      tone: 92,
-                      enthusiasm: 88,
-                      specificity: 75
+                      clarity: 4,
+                      confidence: 4,
+                      tone: 5,
+                      enthusiasm: 4,
+                      specificity: 4
                     },
                     insights: ['Good structure', 'Needs more examples'],
+                    strengthAreas: ['technical', 'communication'],
+                    strengthInsights: ['Good structure', 'Relevant experience'],
+                    opportunityAreas: ['structure', 'specificity'],
+                    opportunityInsights: ['Could add specific examples of outcomes', 'Consider more concrete metrics'],
+                    topTraits: ['Good structure', 'Relevant experience'],
                     aiAttributes: { communicationStyle: 'detailed' }
                   })
                 }
@@ -153,16 +158,26 @@ describe('AI Integration Properties', () => {
             expect(result.scores).toHaveProperty('enthusiasm');
             expect(result.scores).toHaveProperty('specificity');
 
-            // All scores must be numbers between 0 and 100
+            // All scores must be numbers between 1 and 5 (out of 5)
             Object.values(result.scores).forEach(score => {
               expect(typeof score).toBe('number');
-              expect(score).toBeGreaterThanOrEqual(0);
-              expect(score).toBeLessThanOrEqual(100);
+              expect(score).toBeGreaterThanOrEqual(1);
+              expect(score).toBeLessThanOrEqual(5);
             });
 
             expect(result.feedback).toBeTruthy();
             expect(Array.isArray(result.insights)).toBe(true);
             expect(typeof result.aiAttributes).toBe('object');
+            expect(Array.isArray(result.strengthAreas)).toBe(true);
+            (result.strengthAreas ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+            expect(Array.isArray(result.strengthInsights)).toBe(true);
+            (result.strengthInsights ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+            expect(Array.isArray(result.opportunityAreas)).toBe(true);
+            (result.opportunityAreas ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+            expect(Array.isArray(result.opportunityInsights)).toBe(true);
+            (result.opportunityInsights ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+            expect(Array.isArray(result.topTraits)).toBe(true);
+            (result.topTraits ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
           }
         ),
         { numRuns: 100 }
@@ -216,7 +231,7 @@ describe('AI Integration Properties', () => {
                 message: {
                   content: JSON.stringify({
                     feedback: 'Test feedback',
-                    scores: { clarity: 80, confidence: 75, tone: 85, enthusiasm: 90, specificity: 70 },
+                    scores: { clarity: 4, confidence: 4, tone: 4, enthusiasm: 5, specificity: 4 },
                     insights: ['Test insight'],
                     aiAttributes: {}
                   })
@@ -280,7 +295,7 @@ describe('AI Integration Properties', () => {
                 message: {
                   content: JSON.stringify({
                     feedback: 'Detailed feedback about response quality, content relevance, and delivery style',
-                    scores: { clarity: 80, confidence: 75, tone: 85, enthusiasm: 90, specificity: 70 },
+                    scores: { clarity: 4, confidence: 4, tone: 4, enthusiasm: 5, specificity: 4 },
                     insights: [
                       'Good technical explanation showing depth of knowledge',
                       'Could improve by adding more specific examples',
@@ -319,16 +334,16 @@ describe('AI Integration Properties', () => {
 
   // Feature: ai-audio-summarization-backend, Property 17: Scores within valid range
   describe('Property 17: Scores within valid range', () => {
-    it('should ensure all performance scores are between 0 and 100', async () => {
+    it('should ensure all performance scores are between 1 and 5 (out of 5)', async () => {
       await fc.assert(
         fc.asyncProperty(
           fc.string({ minLength: 10, maxLength: 200 }),
           fc.record({
-            clarity: fc.integer({ min: 0, max: 100 }),
-            confidence: fc.integer({ min: 0, max: 100 }),
-            tone: fc.integer({ min: 0, max: 100 }),
-            enthusiasm: fc.integer({ min: 0, max: 100 }),
-            specificity: fc.integer({ min: 0, max: 100 })
+            clarity: fc.integer({ min: 1, max: 5 }),
+            confidence: fc.integer({ min: 1, max: 5 }),
+            tone: fc.integer({ min: 1, max: 5 }),
+            enthusiasm: fc.integer({ min: 1, max: 5 }),
+            specificity: fc.integer({ min: 1, max: 5 })
           }),
           async (transcript, scores) => {
             // Arrange
@@ -371,17 +386,17 @@ describe('AI Integration Properties', () => {
             // Act
             const result = await openaiService.analyzeResponse(transcript, userContext);
 
-            // Assert - All scores must be within valid range
-            expect(result.scores.clarity).toBeGreaterThanOrEqual(0);
-            expect(result.scores.clarity).toBeLessThanOrEqual(100);
-            expect(result.scores.confidence).toBeGreaterThanOrEqual(0);
-            expect(result.scores.confidence).toBeLessThanOrEqual(100);
-            expect(result.scores.tone).toBeGreaterThanOrEqual(0);
-            expect(result.scores.tone).toBeLessThanOrEqual(100);
-            expect(result.scores.enthusiasm).toBeGreaterThanOrEqual(0);
-            expect(result.scores.enthusiasm).toBeLessThanOrEqual(100);
-            expect(result.scores.specificity).toBeGreaterThanOrEqual(0);
-            expect(result.scores.specificity).toBeLessThanOrEqual(100);
+            // Assert - All scores must be within valid range (1-5)
+            expect(result.scores.clarity).toBeGreaterThanOrEqual(1);
+            expect(result.scores.clarity).toBeLessThanOrEqual(5);
+            expect(result.scores.confidence).toBeGreaterThanOrEqual(1);
+            expect(result.scores.confidence).toBeLessThanOrEqual(5);
+            expect(result.scores.tone).toBeGreaterThanOrEqual(1);
+            expect(result.scores.tone).toBeLessThanOrEqual(5);
+            expect(result.scores.enthusiasm).toBeGreaterThanOrEqual(1);
+            expect(result.scores.enthusiasm).toBeLessThanOrEqual(5);
+            expect(result.scores.specificity).toBeGreaterThanOrEqual(1);
+            expect(result.scores.specificity).toBeLessThanOrEqual(5);
           }
         ),
         { numRuns: 100 }
@@ -423,7 +438,7 @@ describe('AI Integration Properties', () => {
                 message: {
                   content: JSON.stringify({
                     feedback: 'Complete analysis feedback for persistence',
-                    scores: { clarity: 82, confidence: 77, tone: 89, enthusiasm: 85, specificity: 73 },
+                    scores: { clarity: 4, confidence: 4, tone: 5, enthusiasm: 4, specificity: 4 },
                     insights: ['Strength in data analysis', 'Improve presentation skills'],
                     aiAttributes: { 
                       communicationStyle: 'analytical',
@@ -458,6 +473,10 @@ describe('AI Integration Properties', () => {
             expect(typeof result.scores).toBe('object');
             expect(Array.isArray(result.insights)).toBe(true);
             expect(typeof result.aiAttributes).toBe('object');
+
+            // Redundancy: strength/opportunity areas appear only at top level, not in aiAttributes
+            expect(result.aiAttributes).not.toHaveProperty('strengthAreas');
+            expect(result.aiAttributes).not.toHaveProperty('improvementAreas');
           }
         ),
         { numRuns: 100 }
@@ -622,7 +641,7 @@ describe('AI Integration Properties', () => {
                 message: {
                   content: JSON.stringify({
                     feedback: 'Test feedback',
-                    scores: { clarity: 80, confidence: 75, tone: 85, enthusiasm: 90, specificity: 70 },
+                    scores: { clarity: 4, confidence: 4, tone: 4, enthusiasm: 5, specificity: 4 },
                     insights: ['Test insight'],
                     aiAttributes: {}
                   })
@@ -704,7 +723,7 @@ describe('AI Integration Properties', () => {
           fc.string({ minLength: 10, maxLength: 150 }).filter(s => s.trim().length >= 10), // Non-empty transcript
           fc.record({
             maliciousScript: fc.constant('<script>alert("xss")</script>'),
-            invalidScore: fc.constantFrom(-10, 150, NaN, null, undefined),
+            invalidScore: fc.constantFrom(-1, 10, 0, NaN, null, undefined),
             missingField: fc.constant(undefined)
           }),
           async (transcript, maliciousData) => {
@@ -737,11 +756,11 @@ describe('AI Integration Properties', () => {
                   content: JSON.stringify({
                     feedback: `Normal feedback ${maliciousData.maliciousScript}`,
                     scores: {
-                      clarity: maliciousData.invalidScore || 80,
-                      confidence: 75,
-                      tone: 85,
-                      enthusiasm: 90,
-                      specificity: 70
+                      clarity: maliciousData.invalidScore ?? 4,
+                      confidence: 4,
+                      tone: 4,
+                      enthusiasm: 5,
+                      specificity: 4
                     },
                     insights: ['Test insight'],
                     aiAttributes: {}
@@ -753,28 +772,33 @@ describe('AI Integration Properties', () => {
             mockOpenAIClient.chat.completions.create.mockResolvedValue(mockAnalysisResponse);
 
             // Act & Assert
-            if (typeof maliciousData.invalidScore === 'number' && 
-                (maliciousData.invalidScore < 0 || maliciousData.invalidScore > 100 || isNaN(maliciousData.invalidScore))) {
-              // Should throw error for invalid scores
-              await expect(openaiService.analyzeResponse(transcript, userContext))
-                .rejects.toThrow(OpenAIServiceError);
-            } else {
-              // Should handle valid responses
-              const result = await openaiService.analyzeResponse(transcript, userContext);
-              
-              // Verify data sanitization
-              expect(typeof result.feedback).toBe('string');
-              expect(typeof result.scores).toBe('object');
-              expect(Array.isArray(result.insights)).toBe(true);
-              
-              // All scores should be valid numbers
-              Object.values(result.scores).forEach(score => {
-                expect(typeof score).toBe('number');
-                expect(score).toBeGreaterThanOrEqual(0);
-                expect(score).toBeLessThanOrEqual(100);
-                expect(isNaN(score)).toBe(false);
-              });
-            }
+            const result = await openaiService.analyzeResponse(transcript, userContext);
+
+            // When API returns invalid scores, parse may throw and fallback can be used, so we always get a result.
+            // Either way, stored/returned scores must be valid (1-5).
+            expect(typeof result.feedback).toBe('string');
+            expect(typeof result.scores).toBe('object');
+            expect(Array.isArray(result.insights)).toBe(true);
+
+            // All scores must be valid numbers in 1-5 range (validation clamps or fallback provides valid scores)
+            Object.values(result.scores).forEach(score => {
+              expect(typeof score).toBe('number');
+              expect(score).toBeGreaterThanOrEqual(1);
+              expect(score).toBeLessThanOrEqual(5);
+              expect(isNaN(score)).toBe(false);
+            });
+
+            // Four attributes + topTraits must be present as arrays (possibly empty); items must be strings
+            expect(Array.isArray(result.strengthAreas)).toBe(true);
+            (result.strengthAreas ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+            expect(Array.isArray(result.strengthInsights)).toBe(true);
+            (result.strengthInsights ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+            expect(Array.isArray(result.opportunityAreas)).toBe(true);
+            (result.opportunityAreas ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+            expect(Array.isArray(result.opportunityInsights)).toBe(true);
+            (result.opportunityInsights ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+            expect(Array.isArray(result.topTraits)).toBe(true);
+            (result.topTraits ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
           }
         ),
         { numRuns: 100 }

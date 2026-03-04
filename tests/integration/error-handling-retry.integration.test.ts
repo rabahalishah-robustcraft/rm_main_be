@@ -421,7 +421,18 @@ describe('Error Handling and Retry Logic Integration Tests', () => {
 
       // Verify fallback was used
       expect(result.feedback).toContain('Based on basic analysis');
-      expect(result.scores.clarity).toBeGreaterThan(0);
+      expect(result.scores.clarity).toBeGreaterThanOrEqual(1);
+      expect(result.scores.clarity).toBeLessThanOrEqual(5);
+      expect(Array.isArray(result.strengthAreas)).toBe(true);
+      expect(Array.isArray(result.strengthInsights)).toBe(true);
+      expect(Array.isArray(result.opportunityAreas)).toBe(true);
+      expect(Array.isArray(result.opportunityInsights)).toBe(true);
+      expect(Array.isArray(result.topTraits)).toBe(true);
+      (result.strengthAreas ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+      (result.strengthInsights ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+      (result.opportunityAreas ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+      (result.opportunityInsights ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
+      (result.topTraits ?? []).forEach((item: unknown) => expect(typeof item).toBe('string'));
       
       // Requirement 8.4: Verify fallback logging
       expect(consoleWarnSpy).toHaveBeenCalledWith(

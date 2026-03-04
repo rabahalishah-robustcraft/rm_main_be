@@ -86,6 +86,7 @@ model AudioSession {
   enthusiasmScore  Int?
   specificityScore Int?
   status           String    @default("pending")
+  processingError  String?   // Error message when status is failed (e.g. parse or API error)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

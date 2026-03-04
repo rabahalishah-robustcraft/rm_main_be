@@ -35,20 +35,20 @@ describe('DashboardService Unit Tests', () => {
       const mockSessions = [
         {
           id: '1',
-          clarityScore: 80,
-          confidenceScore: 85,
-          toneScore: 75,
-          enthusiasmScore: 90,
-          specificityScore: 70,
+          clarityScore: 4,
+          confidenceScore: 4,
+          toneScore: 4,
+          enthusiasmScore: 5,
+          specificityScore: 4,
           createdAt: new Date()
         },
         {
           id: '2',
-          clarityScore: 85,
-          confidenceScore: 80,
-          toneScore: 80,
-          enthusiasmScore: 85,
-          specificityScore: 75,
+          clarityScore: 4,
+          confidenceScore: 4,
+          toneScore: 4,
+          enthusiasmScore: 4,
+          specificityScore: 4,
           createdAt: new Date()
         }
       ];
@@ -57,8 +57,8 @@ describe('DashboardService Unit Tests', () => {
 
       const result = await dashboardService.calculateConfidenceScore('user-id');
 
-      expect(result).toBeGreaterThan(0);
-      expect(result).toBeLessThanOrEqual(100);
+      expect(result).toBeGreaterThanOrEqual(1);
+      expect(result).toBeLessThanOrEqual(5);
     });
 
     it('should handle database errors gracefully', async () => {

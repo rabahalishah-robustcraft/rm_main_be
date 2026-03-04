@@ -20,9 +20,9 @@ export interface AudioUploadData {
   filename?: string;
 }
 
-export interface SessionWithAnalysis extends AudioSession {
+export interface SessionWithAnalysis extends Omit<AudioSession, 'processingError'> {
   analysisComplete: boolean;
-  processingError?: string;
+  processingError?: string | null;
 }
 
 /**
@@ -139,6 +139,9 @@ export class AudioSessionService {
         );
       }
 
+      // Require profile before processing so the user gets an immediate error if missing
+      await this.getProfileForUserOrThrow(session.userId);
+
       // Update session to processing status
       await this.prisma.audioSession.update({
         where: { id: sessionId },
@@ -198,14 +201,12 @@ export class AudioSessionService {
       console.log(`Transcription completed for session ${sessionId}`);
 
       // Step 2: Analyze response using GPT with user context and past sessions summary
+      const profile = await this.getProfileForUserOrThrow(session.userId);
       const pastSessionsSummary = await this.getPastSessionsSummary(session.userId, sessionId, 5);
       const userContext: UserContext = {
-        profile: session.user.profile!,
-        targetRole: session.user.profile?.targetIndustry && session.user.profile?.targetJobTitle
-          ? {
-              industry: session.user.profile.targetIndustry,
-              jobTitle: session.user.profile.targetJobTitle
-            }
+        profile,
+        targetRole: profile.targetIndustry && profile.targetJobTitle
+          ? { industry: profile.targetIndustry, jobTitle: profile.targetJobTitle }
           : undefined,
         pastSessionsSummary: pastSessionsSummary || undefined
       };
@@ -256,11 +257,12 @@ export class AudioSessionService {
       console.log(`Session ${sessionId} processing completed successfully`);
 
     } catch (error) {
-      // Mark session as failed
+      const errorMessage = (error as Error)?.message || 'Processing failed';
+      const processingError = errorMessage.length > 500 ? errorMessage.slice(0, 497) + '...' : errorMessage;
       await this.prisma.audioSession.update({
         where: { id: sessionId },
-        data: { status: SessionStatus.FAILED }
-      }).catch(() => {}); // Ignore update errors
+        data: { status: SessionStatus.FAILED, processingError }
+      }).catch(() => {});
 
       if (error instanceof AudioSessionError) {
         throw error;
@@ -316,14 +318,12 @@ export class AudioSessionService {
       });
 
       // Step 2: Analyze response using GPT with user context and past sessions summary
+      const profile = await this.getProfileForUserOrThrow(session.userId);
       const pastSessionsSummary = await this.getPastSessionsSummary(session.userId, sessionId, 5);
       const userContext: UserContext = {
-        profile: session.user.profile!,
-        targetRole: session.user.profile?.targetIndustry && session.user.profile?.targetJobTitle
-          ? {
-              industry: session.user.profile.targetIndustry,
-              jobTitle: session.user.profile.targetJobTitle
-            }
+        profile,
+        targetRole: profile.targetIndustry && profile.targetJobTitle
+          ? { industry: profile.targetIndustry, jobTitle: profile.targetJobTitle }
           : undefined,
         pastSessionsSummary: pastSessionsSummary || undefined
       };
@@ -350,11 +350,12 @@ export class AudioSessionService {
       await this.subscriptionService.incrementUsage(session.userId);
 
     } catch (error) {
-      // Mark session as failed
+      const errorMessage = (error as Error)?.message || 'Processing failed';
+      const processingError = errorMessage.length > 500 ? errorMessage.slice(0, 497) + '...' : errorMessage;
       await this.prisma.audioSession.update({
         where: { id: sessionId },
-        data: { status: SessionStatus.FAILED }
-      }).catch(() => {}); // Ignore update errors
+        data: { status: SessionStatus.FAILED, processingError }
+      }).catch(() => {});
 
       if (error instanceof AudioSessionError) {
         throw error;
@@ -397,23 +398,17 @@ export class AudioSessionService {
       );
     }
 
-    if (!session.user.profile) {
-      throw new AudioSessionError('User profile not found', 'USER_NOT_FOUND');
-    }
-
     await this.prisma.audioSession.update({
       where: { id: sessionId },
       data: { transcript }
     });
 
+    const profile = await this.getProfileForUserOrThrow(session.userId);
     const pastSessionsSummary = await this.getPastSessionsSummary(session.userId, sessionId, 5);
     const userContext: UserContext = {
-      profile: session.user.profile,
-      targetRole: session.user.profile.targetIndustry && session.user.profile.targetJobTitle
-        ? {
-            industry: session.user.profile.targetIndustry,
-            jobTitle: session.user.profile.targetJobTitle
-          }
+      profile,
+      targetRole: profile.targetIndustry && profile.targetJobTitle
+        ? { industry: profile.targetIndustry, jobTitle: profile.targetJobTitle }
         : undefined,
       pastSessionsSummary: pastSessionsSummary || undefined
     };
@@ -473,7 +468,7 @@ export class AudioSessionService {
       return {
         ...session,
         analysisComplete: session.status === SessionStatus.COMPLETED,
-        processingError: session.status === SessionStatus.FAILED ? 'Processing failed' : undefined
+        processingError: session.processingError ?? (session.status === SessionStatus.FAILED ? 'Processing failed' : undefined)
       };
     } catch (error) {
       throw new AudioSessionError(
@@ -530,8 +525,8 @@ export class AudioSessionService {
   } {
     const { scores } = analysis;
     
-    // Ensure scores are within valid range (0-100)
-    const clampScore = (score: number): number => Math.max(0, Math.min(100, Math.round(score)));
+    // Ensure scores are within valid range (1-5 out of 5)
+    const clampScore = (score: number): number => Math.max(1, Math.min(5, Math.round(score)));
 
     return {
       clarityScore: clampScore(scores.clarity),
@@ -556,6 +551,22 @@ export class AudioSessionService {
         ...scores
       }
     });
+  }
+
+  /**
+   * Get user profile for analysis. Throws if profile does not exist so the user is asked to create their profile first.
+   */
+  private async getProfileForUserOrThrow(userId: string): Promise<UserProfile> {
+    const profile = await this.prisma.userProfile.findUnique({
+      where: { userId }
+    });
+    if (!profile) {
+      throw new AudioSessionError(
+        'Please create your profile first. Processing will be available after you complete your profile.',
+        'PROFILE_REQUIRED'
+      );
+    }
+    return profile;
   }
 
   /**

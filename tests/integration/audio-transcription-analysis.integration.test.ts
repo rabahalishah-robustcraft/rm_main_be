@@ -178,7 +178,19 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
       // Step 5: Verify GPT analysis returned scores and feedback
       // Requirement 2.1, 2.2, 2.3, 2.4: GPT analysis returns scores and feedback
       expect(updatedSession?.aiAnalysis).toBeDefined();
-      
+      const aiAnalysis = updatedSession?.aiAnalysis as {
+        strengthAreas?: string[];
+        strengthInsights?: string[];
+        opportunityAreas?: string[];
+        opportunityInsights?: string[];
+        topTraits?: string[];
+      } | null;
+      expect(Array.isArray(aiAnalysis?.strengthAreas)).toBe(true);
+      expect(Array.isArray(aiAnalysis?.strengthInsights)).toBe(true);
+      expect(Array.isArray(aiAnalysis?.opportunityAreas)).toBe(true);
+      expect(Array.isArray(aiAnalysis?.opportunityInsights)).toBe(true);
+      expect(Array.isArray(aiAnalysis?.topTraits)).toBe(true);
+
       // Verify scores are present and within valid range
       expect(updatedSession?.clarityScore).toBeDefined();
       expect(updatedSession?.confidenceScore).toBeDefined();
@@ -186,11 +198,11 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
       expect(updatedSession?.enthusiasmScore).toBeDefined();
       expect(updatedSession?.specificityScore).toBeDefined();
 
-      // Scores should be between 0 and 100
-      expect(updatedSession?.clarityScore).toBeGreaterThanOrEqual(0);
-      expect(updatedSession?.clarityScore).toBeLessThanOrEqual(100);
-      expect(updatedSession?.confidenceScore).toBeGreaterThanOrEqual(0);
-      expect(updatedSession?.confidenceScore).toBeLessThanOrEqual(100);
+      // Scores should be between 1 and 5 (out of 5)
+      expect(updatedSession?.clarityScore).toBeGreaterThanOrEqual(1);
+      expect(updatedSession?.clarityScore).toBeLessThanOrEqual(5);
+      expect(updatedSession?.confidenceScore).toBeGreaterThanOrEqual(1);
+      expect(updatedSession?.confidenceScore).toBeLessThanOrEqual(5);
 
       // Step 6: Verify session is marked as completed
       expect(updatedSession?.status).toBe('completed');

@@ -183,9 +183,9 @@ export class DashboardService {
       });
 
       const confidenceScore = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
-      
-      // Round to nearest integer and ensure it's between 0-100
-      return Math.max(0, Math.min(100, Math.round(confidenceScore)));
+      if (totalWeight === 0) return 0; // No sessions: no score
+      // Round to nearest and ensure it's between 1-5 (out of 5)
+      return Math.max(1, Math.min(5, Math.round(confidenceScore)));
     } catch (error) {
       throw new DashboardError(
         'Failed to calculate confidence score',
