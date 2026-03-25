@@ -1,17 +1,22 @@
 import request from 'supertest';
 import express from 'express';
-import authRoutes from '../../src/routes/auth';
+import createAuthRoutes from '../../src/routes/auth';
 import { errorHandler } from '../../src/middleware/error';
 
 // Mock the AuthService to avoid database dependencies
-jest.mock('../../src/services/AuthService', () => ({
-  authService: {
-    register: jest.fn(),
-    login: jest.fn(),
-    logout: jest.fn(),
-    refreshToken: jest.fn()
-  }
-}));
+const mockAuthService = {
+  register: jest.fn(),
+  login: jest.fn(),
+  logout: jest.fn(),
+  refreshToken: jest.fn(),
+  validateToken: jest.fn(),
+  loginWithGoogle: jest.fn(),
+  requestPasswordReset: jest.fn(),
+  verifyOTP: jest.fn(),
+  resetPassword: jest.fn(),
+  changePassword: jest.fn(),
+  changeEmail: jest.fn(),
+};
 
 // Mock Prisma to avoid database dependencies
 jest.mock('../../src/lib/prisma', () => ({
@@ -23,15 +28,13 @@ jest.mock('../../src/lib/prisma', () => ({
   }
 }));
 
-import { authService } from '../../src/services/AuthService';
 import { SubscriptionTier } from '../../src/types/auth';
 
-const mockAuthService = authService as jest.Mocked<typeof authService>;
-
-// Create test app
+// Create test app with mock services
 const app = express();
 app.use(express.json());
-app.use('/api/auth', authRoutes);
+const authRouter = createAuthRoutes({ authService: mockAuthService } as any);
+app.use('/api/auth', authRouter);
 app.use(errorHandler);
 
 describe('Authentication Routes Integration', () => {
@@ -168,7 +171,7 @@ describe('Authentication Routes Integration', () => {
       const response = await request(app)
         .post('/api/auth/refresh')
         .send({
-          token: 'old-jwt-token-123'
+          refreshToken: 'old-jwt-token-123'
         });
 
       expect(response.status).toBe(200);
@@ -190,29 +193,6 @@ describe('Authentication Routes Integration', () => {
     });
   });
 
-  describe('Rate Limiting', () => {
-    it('should apply rate limiting to registration endpoint', async () => {
-      // Mock multiple failed registrations to trigger rate limiting
-      mockAuthService.register.mockRejectedValue(new Error('Registration failed'));
-
-      // Make multiple requests quickly
-      const requests = Array(6).fill(null).map(() =>
-        request(app)
-          .post('/api/auth/register')
-          .send({
-            email: 'test@example.com',
-            password: 'Password123!'
-          })
-      );
-
-      const responses = await Promise.all(requests);
-
-      // The last request should be rate limited
-      const rateLimitedResponse = responses[responses.length - 1];
-      expect(rateLimitedResponse.status).toBe(429);
-    });
-  });
-
   describe('Error Handling', () => {
     it('should handle service errors gracefully', async () => {
       mockAuthService.register.mockRejectedValue(new Error('Database connection failed'));
@@ -226,6 +206,30 @@ describe('Authentication Routes Integration', () => {
 
       expect(response.status).toBe(500);
       expect(response.body.error.code).toBe('INTERNAL_ERROR');
+    });
+  });
+
+  // Rate limiting test must run last since it exhausts the rate limit window
+  describe('Rate Limiting', () => {
+    it('should apply rate limiting to registration endpoint', async () => {
+      // Mock multiple failed registrations to trigger rate limiting
+      mockAuthService.register.mockRejectedValue(new Error('Registration failed'));
+
+      // Make multiple requests quickly (rate limit is 10 per window)
+      const requests = Array(12).fill(null).map(() =>
+        request(app)
+          .post('/api/auth/register')
+          .send({
+            email: 'test@example.com',
+            password: 'Password123!'
+          })
+      );
+
+      const responses = await Promise.all(requests);
+
+      // At least one request should be rate limited
+      const hasRateLimited = responses.some(r => r.status === 429);
+      expect(hasRateLimited).toBe(true);
     });
   });
 });

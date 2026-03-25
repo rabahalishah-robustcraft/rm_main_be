@@ -55,8 +55,10 @@ export function createAuthRoutes(services: ServiceContainer): Router {
       res.status(201).json({
         success: true,
         message: 'User registered successfully',
-        user: toSafeUser(result.user),
-        token: result.token
+        data: {
+          user: toSafeUser(result.user),
+          token: result.token
+        }
       });
     })
   );
@@ -77,8 +79,10 @@ export function createAuthRoutes(services: ServiceContainer): Router {
       res.status(200).json({
         success: true,
         message: 'Login successful',
-        user: toSafeUser(result.user),
-        token: result.token
+        data: {
+          user: toSafeUser(result.user),
+          token: result.token
+        }
       });
     })
   );
@@ -150,7 +154,9 @@ export function createAuthRoutes(services: ServiceContainer): Router {
       res.status(200).json({
         success: true,
         message: 'Token refreshed successfully',
-        token: newToken
+        data: {
+          token: newToken
+        }
       });
     })
   );
@@ -170,8 +176,10 @@ export function createAuthRoutes(services: ServiceContainer): Router {
       res.status(200).json({
         success: true,
         message: 'Login successful',
-        user: toSafeUser(result.user),
-        token: result.token
+        data: {
+          user: toSafeUser(result.user),
+          token: result.token
+        }
       });
     })
   );

@@ -1,15 +1,18 @@
 import request from 'supertest';
-import app from '../../src/index';
+import { createApp } from '../../src/index';
 import { authService } from '../../src/services/AuthService';
 import prisma from '../../src/lib/prisma';
 
 describe('Profile Routes Integration Tests', () => {
+  let app: any;
   let authToken: string;
   let userId: string;
 
   beforeAll(async () => {
+    app = await createApp();
+
     // Create a test user and get auth token
-    const testUser = await authService.register('test@example.com', 'password123');
+    const testUser = await authService.register('test@example.com', 'Password123!');
     authToken = testUser.token;
     userId = testUser.user.id;
   });

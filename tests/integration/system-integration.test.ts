@@ -7,7 +7,7 @@
 import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import container from '../../src/container';
-import startServer from '../../src/index';
+import { createApp } from '../../src/index';
 
 describe('System Integration Tests', () => {
   let app: any;
@@ -21,8 +21,8 @@ describe('System Integration Tests', () => {
     services = await container.initialize();
     prisma = services.prisma;
     
-    // Start the server with dependency injection
-    app = await startServer();
+    // Create the app (without listening on a port)
+    app = await createApp();
 
     // Clean up any existing test data
     await cleanupTestData();

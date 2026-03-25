@@ -7,7 +7,7 @@
 import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import container from '../../src/container';
-import startServer from '../../src/index';
+import { createApp } from '../../src/index';
 
 describe('Validation Integration Tests', () => {
   let app: any;
@@ -18,7 +18,7 @@ describe('Validation Integration Tests', () => {
   beforeAll(async () => {
     services = await container.initialize();
     prisma = services.prisma;
-    app = await startServer();
+    app = await createApp();
 
     // Create a test user for authenticated endpoints
     const registerResponse = await request(app)

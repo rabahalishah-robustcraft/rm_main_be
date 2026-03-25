@@ -11,7 +11,7 @@
 import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import container from '../../src/container';
-import startServer from '../../src/index';
+import { createApp } from '../../src/index';
 import { createSystemIntegrationValidator } from '../../src/utils/systemIntegration';
 
 describe('Complete System Integration Tests - Task 13.1', () => {
@@ -27,8 +27,8 @@ describe('Complete System Integration Tests - Task 13.1', () => {
     prisma = services.prisma;
     systemValidator = createSystemIntegrationValidator(services);
     
-    // Start the server with dependency injection
-    app = await startServer();
+    // Create the app (without listening on a port)
+    app = await createApp();
 
     // Clean up any existing test data
     await cleanupTestData();

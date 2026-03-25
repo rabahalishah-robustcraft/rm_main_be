@@ -1,15 +1,18 @@
 import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
-import app from '../../src/index';
+import { createApp } from '../../src/index';
 
 const prisma = new PrismaClient();
 
 describe('Complete User Workflow Integration Tests', () => {
+  let app: any;
   let userId: string;
   let authToken: string;
   let sessionId: string;
 
   beforeAll(async () => {
+    app = await createApp();
+
     // Clean up any existing test data
     await prisma.audioSession.deleteMany({
       where: {

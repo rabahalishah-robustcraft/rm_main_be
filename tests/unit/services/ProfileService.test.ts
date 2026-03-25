@@ -727,16 +727,9 @@ describe('ProfileService Unit Tests', () => {
         updatedAt: new Date('2024-01-01'),
       };
 
-      const mockIndustry = {
-        id: 'industry-1',
-        name: 'Technology',
-        jobTitles: ['Software Engineer', 'Senior Software Engineer', 'Tech Lead']
-      };
-
       mockValidationUtils.isValidUUID.mockReturnValue(true);
       mockValidationUtils.validate.mockReturnValue({ industry, jobTitle });
       mockPrisma.userProfile.findUnique.mockResolvedValue(existingProfile);
-      mockPrisma.industry.findUnique.mockResolvedValue(mockIndustry);
       mockPrisma.userProfile.update.mockResolvedValue({
         ...existingProfile,
         targetIndustry: industry,
@@ -752,8 +745,8 @@ describe('ProfileService Unit Tests', () => {
         { industry, jobTitle },
         {}
       );
-      expect(mockPrisma.industry.findUnique).toHaveBeenCalledWith({
-        where: { name: industry }
+      expect(mockPrisma.userProfile.findUnique).toHaveBeenCalledWith({
+        where: { userId }
       });
       expect(mockPrisma.userProfile.update).toHaveBeenCalledWith({
         where: { userId },
@@ -770,23 +763,10 @@ describe('ProfileService Unit Tests', () => {
       const industry = 'InvalidIndustry';
       const jobTitle = 'Software Engineer';
 
-      const existingProfile = {
-        id: 'profile-123',
-        userId: 'user-123',
-        resumeS3Key: null,
-        targetIndustry: null,
-        targetJobTitle: null,
-        aiAttributes: {},
-        extractedSkills: [],
-        experienceLevel: null,
-        createdAt: new Date('2024-01-01'),
-        updatedAt: new Date('2024-01-01'),
-      };
-
       mockValidationUtils.isValidUUID.mockReturnValue(true);
-      mockValidationUtils.validate.mockReturnValue({ industry, jobTitle });
-      mockPrisma.userProfile.findUnique.mockResolvedValue(existingProfile);
-      mockPrisma.industry.findUnique.mockResolvedValue(null);
+      mockValidationUtils.validate.mockImplementation(() => {
+        throw new ValidationError('Invalid industry');
+      });
 
       // Act & Assert
       await expect(profileService.setTargetRole(userId, industry, jobTitle))
@@ -799,29 +779,10 @@ describe('ProfileService Unit Tests', () => {
       const industry = 'Technology';
       const jobTitle = 'Invalid Job Title';
 
-      const existingProfile = {
-        id: 'profile-123',
-        userId: 'user-123',
-        resumeS3Key: null,
-        targetIndustry: null,
-        targetJobTitle: null,
-        aiAttributes: {},
-        extractedSkills: [],
-        experienceLevel: null,
-        createdAt: new Date('2024-01-01'),
-        updatedAt: new Date('2024-01-01'),
-      };
-
-      const mockIndustry = {
-        id: 'industry-1',
-        name: 'Technology',
-        jobTitles: ['Software Engineer', 'Senior Software Engineer', 'Tech Lead']
-      };
-
       mockValidationUtils.isValidUUID.mockReturnValue(true);
-      mockValidationUtils.validate.mockReturnValue({ industry, jobTitle });
-      mockPrisma.userProfile.findUnique.mockResolvedValue(existingProfile);
-      mockPrisma.industry.findUnique.mockResolvedValue(mockIndustry);
+      mockValidationUtils.validate.mockImplementation(() => {
+        throw new ValidationError('Invalid job title');
+      });
 
       // Act & Assert
       await expect(profileService.setTargetRole(userId, industry, jobTitle))

@@ -67,7 +67,7 @@ describe('Resume Processing Integration Tests', () => {
     profileService = new ProfileService(s3Service, openaiService, prisma);
 
     // Create test user
-    const testUser = await authService.register('resume-test@example.com', 'password123');
+    const testUser = await authService.register('resume-test@example.com', 'Password123!');
     testUserId = testUser.user.id;
 
     // Create test PDF resume
@@ -178,7 +178,7 @@ describe('Resume Processing Integration Tests', () => {
       );
 
       // Create another test user for this test
-      const testUser2 = await authService.register('resume-test2@example.com', 'password123');
+      const testUser2 = await authService.register('resume-test2@example.com', 'Password123!');
       const testUserId2 = testUser2.user.id;
 
       try {
@@ -305,7 +305,7 @@ describe('Resume Processing Integration Tests', () => {
 
     it('should handle resume download for user without resume', async () => {
       // Create a new user without a resume
-      const testUser3 = await authService.register('no-resume@example.com', 'password123');
+      const testUser3 = await authService.register('no-resume@example.com', 'Password123!');
       const testUserId3 = testUser3.user.id;
 
       try {

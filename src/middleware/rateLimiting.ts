@@ -46,10 +46,13 @@ class MemoryStore {
 
 const store = new MemoryStore();
 
-// Cleanup expired entries every 5 minutes
-setInterval(() => {
-  store.cleanup();
-}, 5 * 60 * 1000);
+// Cleanup expired entries every 5 minutes.
+// Skip in Jest test environment to avoid keeping test workers alive with open timers.
+if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
+  setInterval(() => {
+    store.cleanup();
+  }, 5 * 60 * 1000).unref();
+}
 
 /**
  * Generic rate limiting middleware

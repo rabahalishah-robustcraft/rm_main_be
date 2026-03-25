@@ -1,16 +1,19 @@
 import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
-import app from '../../src/index';
+import { createApp } from '../../src/index';
 import { authService } from '../../src/services/AuthService';
 import { SubscriptionTier } from '../../src/services/SubscriptionService';
 
 const prisma = new PrismaClient();
 
 describe('Subscription Routes Integration Tests', () => {
+  let app: any;
   let authToken: string;
   let userId: string;
 
   beforeAll(async () => {
+    app = await createApp();
+
     // Clean up any existing test data
     await prisma.usageTracking.deleteMany({
       where: {
@@ -34,7 +37,7 @@ describe('Subscription Routes Integration Tests', () => {
     // Create test user and get auth token
     const testUser = await authService.register(
       'subscription-test@example.com',
-      'password123'
+      'Password123!'
     );
     authToken = testUser.token;
     userId = testUser.user.id;

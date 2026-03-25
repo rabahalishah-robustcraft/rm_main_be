@@ -13,16 +13,26 @@ jest.mock('@/utils/jwt', () => ({
   validateToken: jest.fn(),
 }));
 
-jest.mock('@/lib/prisma', () => ({
-  user: {
+jest.mock('@/lib/prisma', () => {
+  const mockUser = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
-  },
-  userProfile: {
+  };
+  const mockUserProfile = {
     create: jest.fn(),
-  },
-}));
+  };
+  return {
+    __esModule: true,
+    default: {
+      user: mockUser,
+      userProfile: mockUserProfile,
+      $transaction: jest.fn(async (fn: (tx: any) => Promise<any>) => {
+        return fn({ user: mockUser, userProfile: mockUserProfile });
+      }),
+    },
+  };
+});
 
 import * as passwordUtils from '@/utils/password';
 import * as jwtUtils from '@/utils/jwt';

@@ -5,15 +5,25 @@ import { SubscriptionTier, AuthenticationError, ValidationError } from '../../sr
 import { arbitraries } from '../setup-properties';
 
 // Mock all dependencies
-jest.mock('../../src/lib/prisma', () => ({
-  user: {
+jest.mock('../../src/lib/prisma', () => {
+  const mockUser = {
     findUnique: jest.fn(),
     create: jest.fn(),
-  },
-  userProfile: {
+  };
+  const mockUserProfile = {
     create: jest.fn(),
-  },
-}));
+  };
+  return {
+    __esModule: true,
+    default: {
+      user: mockUser,
+      userProfile: mockUserProfile,
+      $transaction: jest.fn(async (fn: (tx: any) => Promise<any>) => {
+        return fn({ user: mockUser, userProfile: mockUserProfile });
+      }),
+    },
+  };
+});
 
 jest.mock('../../src/utils/password', () => ({
   hashPassword: jest.fn(),

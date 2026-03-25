@@ -36,12 +36,12 @@ import {
 // Load environment variables
 dotenv.config();
 
-// Run startup validation
-async function startServer() {
+// Create the Express app with all middleware and routes (without listening)
+async function createApp() {
   console.log('🚀 AI Audio Summarization Backend starting...');
-  
+
   const validation = await runStartupValidation();
-  
+
   if (!validation.success) {
     console.error('❌ Startup validation failed. Exiting...');
     process.exit(1);
@@ -53,7 +53,7 @@ async function startServer() {
   // Perform system integration check
   console.log('🔍 Performing system integration check...');
   const integrationHealthy = await quickIntegrationCheck(services);
-  
+
   if (!integrationHealthy) {
     console.warn('⚠️  System integration check detected issues - proceeding with caution');
   } else {
@@ -61,7 +61,6 @@ async function startServer() {
   }
 
   const app = express();
-  const PORT = config.PORT;
 
   // Trust proxy for accurate IP addresses
   app.set('trust proxy', 1);
@@ -112,12 +111,12 @@ async function startServer() {
   }
 
   // Body parsing middleware
-  app.use(express.json({ 
-    limit: `${Math.floor(config.MAX_FILE_SIZE / (1024 * 1024))}mb` 
+  app.use(express.json({
+    limit: `${Math.floor(config.MAX_FILE_SIZE / (1024 * 1024))}mb`
   }));
-  app.use(express.urlencoded({ 
-    extended: true, 
-    limit: `${Math.floor(config.MAX_FILE_SIZE / (1024 * 1024))}mb` 
+  app.use(express.urlencoded({
+    extended: true,
+    limit: `${Math.floor(config.MAX_FILE_SIZE / (1024 * 1024))}mb`
   }));
 
   // Session security for authenticated requests
@@ -133,7 +132,7 @@ async function startServer() {
   // Root endpoint with startup summary
   app.get('/', (req, res) => {
     const startupSummary = getStartupValidator().getStartupSummary();
-    
+
     res.status(200).json({
       success: true,
       message: 'AI Audio Summarization Backend API',
@@ -150,6 +149,14 @@ async function startServer() {
 
   // Global error handler (must be last)
   app.use(errorHandler);
+
+  return app;
+}
+
+// Run startup validation and start listening
+async function startServer() {
+  const app = await createApp();
+  const PORT = config.PORT;
 
   // Graceful shutdown handling
   const gracefulShutdown = async () => {
@@ -182,21 +189,24 @@ async function startServer() {
     console.log(`🌍 Environment: ${config.NODE_ENV}`);
     console.log(`📊 Monitoring: Active`);
     console.log(`🔒 Security: Enhanced`);
-    
+
     if (config.ENABLE_ADMIN_ENDPOINTS) {
       console.log(`👑 Admin endpoints: Enabled`);
     }
-    
+
     console.log('🎉 Server startup complete!');
   });
 
   return app;
 }
 
-// Start the server
-startServer().catch(error => {
-  console.error('Failed to start server:', error);
-  process.exit(1);
-});
+// Only auto-start when not in test environment
+if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
+  startServer().catch(error => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  });
+}
 
+export { createApp };
 export default startServer;

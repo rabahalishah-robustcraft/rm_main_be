@@ -40,6 +40,7 @@ module.exports = {
       displayName: 'integration',
       testMatch: ['<rootDir>/tests/integration/**/*.test.ts'],
       setupFilesAfterEnv: ['<rootDir>/tests/setup-integration.ts'],
+      runInBand: true,
       moduleNameMapper: {
         '^@/(.*)$': '<rootDir>/src/$1'
       }

@@ -1,8 +1,9 @@
 import request from 'supertest';
 import express from 'express';
-import authRoutes from '../../../src/routes/auth';
+import createAuthRoutes from '../../../src/routes/auth';
 import { errorHandler } from '../../../src/middleware/error';
 import { authService } from '../../../src/services/AuthService';
+import type { ServiceContainer } from '../../../src/container';
 import { SubscriptionTier } from '../../../src/types/auth';
 
 // Mock the AuthService
@@ -12,7 +13,13 @@ const mockAuthService = authService as jest.Mocked<typeof authService>;
 // Create test app
 const app = express();
 app.use(express.json());
-app.use('/api/auth', authRoutes);
+
+// Minimal mock service container for auth routes
+const mockServices = {
+  authService: mockAuthService
+} as unknown as ServiceContainer;
+
+app.use('/api/auth', createAuthRoutes(mockServices));
 app.use(errorHandler);
 
 describe('Authentication Routes', () => {
@@ -140,7 +147,7 @@ describe('Authentication Routes', () => {
       const response = await request(app)
         .post('/api/auth/refresh')
         .send({
-          token: 'old-jwt-token-123'
+          refreshToken: 'old-jwt-token-123'
         });
 
       expect(response.status).toBe(200);

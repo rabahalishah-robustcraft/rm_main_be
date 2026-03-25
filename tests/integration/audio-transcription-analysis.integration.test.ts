@@ -76,7 +76,7 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
     );
 
     // Create test user with profile
-    const testUser = await authService.register('audio-test@example.com', 'password123');
+    const testUser = await authService.register('audio-test@example.com', 'Password123!');
     testUserId = testUser.user.id;
 
     // Create or update user profile with target role information
@@ -322,7 +322,7 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
       );
 
       // Create another test user for this test
-      const testUser2 = await authService.register('audio-test2@example.com', 'password123');
+      const testUser2 = await authService.register('audio-test2@example.com', 'Password123!');
       const testUserId2 = testUser2.user.id;
 
       try {

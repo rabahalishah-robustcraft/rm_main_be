@@ -48,7 +48,7 @@ describe('Resume Upload and Processing - Integration Test', () => {
     profileService = new ProfileService(s3Service, openaiService, prisma);
 
     // Create test user
-    const testUser = await authService.register('resume-simple-test@example.com', 'password123');
+    const testUser = await authService.register('resume-simple-test@example.com', 'Password123!');
     testUserId = testUser.user.id;
 
     // Create test PDF resume
