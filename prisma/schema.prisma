@@ -1,0 +1,136 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String?   // nullable for Google OAuth users
+  authProvider     String    @default("local") // "local" | "google"
+  googleId         String?   @unique // Google sub claim, for linking
+  subscriptionTier String    @default("free")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  profile        UserProfile?
+  audioSessions  AudioSession[]
+  usageTracking  UsageTracking[]
+
+  @@map("users")
+}
+
+model PasswordResetOTP {
+  id        String   @id @default(cuid())
+  email     String
+  otpHash   String   // bcrypt hash of OTP
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, expiresAt])
+  @@map("password_reset_otps")
+}
+
+model UserProfile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  
+  // Profile Information (from Figma design)
+  fullName           String?
+  currentJobTitle    String?
+  currentCompany     String?
+  school             String?
+  degreeInfo         String?
+  previousJobTitles  String[] @default([])
+  
+  // Resume and Skills
+  resumeS3Key        String?
+  extractedSkills    String[] @default([])
+  experienceLevel    String?
+  
+  // Target Role
+  targetIndustry     String?
+  targetJobTitle     String?
+  
+  // AI Attributes
+  aiAttributes       Json     @default("{}")
+  
+  // Timestamps
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+model AudioSession {
+  id               String    @id @default(cuid())
+  userId           String
+  audioS3Key       String
+  displayName      String?   // User-editable event label/name
+  transcript       String?
+  aiAnalysis       Json?
+  clarityScore     Int?
+  confidenceScore  Int?
+  toneScore        Int?
+  enthusiasmScore  Int?
+  specificityScore Int?
+  status           String    @default("pending")
+  processingError  String?   // Error message when status is failed (e.g. parse or API error)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("audio_sessions")
+}
+
+model UsageTracking {
+  id           String   @id @default(cuid())
+  userId       String
+  month        Int
+  year         Int
+  sessionCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Unique constraint to ensure one record per user per month/year
+  @@unique([userId, month, year])
+  @@map("usage_tracking")
+}
+
+model Industry {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  jobTitles   String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("industries")
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  type      String   @default("string") // string, number, boolean, json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}
