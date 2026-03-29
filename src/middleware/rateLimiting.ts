@@ -277,24 +277,55 @@ export class RedisRateLimit {
   }
 }
 
+const PASSWORD_KEYS = new Set(['password', 'newPassword', 'currentPassword']);
+
+function collectInspectableStrings(query: Request['query'], body: unknown): string[] {
+  const out: string[] = [];
+
+  function walk(value: unknown): void {
+    if (value === null || value === undefined) return;
+    if (typeof value === 'string') {
+      out.push(value);
+      return;
+    }
+    if (typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    for (const key of Object.keys(value as object)) {
+      if (PASSWORD_KEYS.has(key)) continue;
+      walk((value as Record<string, unknown>)[key]);
+    }
+  }
+
+  if (query && typeof query === 'object') {
+    for (const key of Object.keys(query)) {
+      if (PASSWORD_KEYS.has(key)) continue;
+      const v = query[key];
+      if (typeof v === 'string') out.push(v);
+      else if (Array.isArray(v)) {
+        for (const item of v) {
+          if (typeof item === 'string') out.push(item);
+        }
+      }
+    }
+  }
+
+  walk(body);
+  return out;
+}
+
 /**
  * Abuse detection middleware
+ * Inspects string values only (not JSON serialization) to avoid false positives on
+ * normal JSON braces and to work correctly when the body is empty.
  */
 export const abuseDetection = (req: Request, res: Response, next: NextFunction): void => {
   const clientId = getClientIdentifier(req);
-  
-  // Exclude password fields from abuse detection
-  const sanitizedData = { ...req.query, ...req.body };
-  if (sanitizedData.password) {
-    delete sanitizedData.password;
-  }
-  if (sanitizedData.newPassword) {
-    delete sanitizedData.newPassword;
-  }
-  if (sanitizedData.currentPassword) {
-    delete sanitizedData.currentPassword;
-  }
-  
+  const strings = collectInspectableStrings(req.query, req.body);
+  const requestData = strings.join('\u0000');
+
   const suspiciousPatterns = [
     // SQL injection patterns
     /(\b(union|select|insert|update|delete|drop|create|alter|exec|execute)\b)/i,
@@ -302,14 +333,16 @@ export const abuseDetection = (req: Request, res: Response, next: NextFunction):
     /<script[^>]*>.*?<\/script>/gi,
     // Path traversal
     /\.\.[\/\\]/,
-    // Command injection (only check in non-password fields)
-    /[;&|`$(){}[\]]/
+    // Command injection — narrow patterns (avoid flagging every JSON object or "Name (Ltd)")
+    /;\s*(curl|wget|rm\b|bash|\/bin\/|sh\b|exec\b|eval\b)/i,
+    /\$\(/,
+    /`/,
+    /\|\s*(curl|wget|bash|sh)\b/i,
+    /(&&|\|\|)\s*(curl|wget|rm|bash|sh)\b/i
   ];
 
-  // Check request body and query parameters (excluding passwords)
-  const requestData = JSON.stringify(sanitizedData);
-  
   for (const pattern of suspiciousPatterns) {
+    pattern.lastIndex = 0;
     if (pattern.test(requestData)) {
       console.warn('Suspicious request detected:', {
         clientId,

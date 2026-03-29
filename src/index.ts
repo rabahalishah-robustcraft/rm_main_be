@@ -105,12 +105,7 @@ async function createApp() {
     app.use('/api', apiRateLimit);
   }
 
-  // Abuse detection (if enabled)
-  if (config.ENABLE_ABUSE_DETECTION) {
-    app.use(abuseDetection);
-  }
-
-  // Body parsing middleware
+  // Body parsing middleware (must run before abuse detection so body/query strings are inspectable)
   app.use(express.json({
     limit: `${Math.floor(config.MAX_FILE_SIZE / (1024 * 1024))}mb`
   }));
@@ -118,6 +113,11 @@ async function createApp() {
     extended: true,
     limit: `${Math.floor(config.MAX_FILE_SIZE / (1024 * 1024))}mb`
   }));
+
+  // Abuse detection (if enabled) — after parsers; see abuseDetection implementation
+  if (config.ENABLE_ABUSE_DETECTION) {
+    app.use(abuseDetection);
+  }
 
   // Session security for authenticated requests
   app.use(sessionSecurity);
