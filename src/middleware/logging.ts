@@ -180,8 +180,9 @@ export const sanitizeRequest = (req: Request, res: Response, next: NextFunction)
     }
   }
 
-  // Sanitize body (for string fields only)
-  if (req.body && typeof req.body === 'object') {
+  // Sanitize body (for string fields only). Skip multipart — body is parsed later by multer; touching it can break uploads.
+  const ct = (req.get('Content-Type') || '').toLowerCase();
+  if (!ct.includes('multipart/form-data') && req.body && typeof req.body === 'object') {
     sanitizeObject(req.body);
   }
 

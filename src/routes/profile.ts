@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { ServiceContainer } from '../container';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { authenticate, requireEmailVerified, AuthenticatedRequest } from '../middleware/auth';
 import { enforceDataIsolation } from '../middleware/security';
 import { uploadRateLimit } from '../middleware/rateLimiting';
 import { resumeUpload } from '../utils/fileUpload';
@@ -17,6 +17,7 @@ export function createProfileRoutes(services: ServiceContainer): Router {
 
   // Apply authentication middleware to all profile routes
   router.use(authenticate);
+  router.use(requireEmailVerified);
 
   // Apply data isolation for profile access
   router.use(enforceDataIsolation('profile'));

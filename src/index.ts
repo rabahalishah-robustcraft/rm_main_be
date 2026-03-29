@@ -125,7 +125,7 @@ async function createApp() {
   // Health check endpoint (before other routes)
   app.use(healthCheck);
 
-  // API routes with dependency injection
+  // API routes with dependency injection (single mount: all routes under /api only)
   const apiRoutes = createApiRoutes(services);
   app.use('/api', apiRoutes);
 

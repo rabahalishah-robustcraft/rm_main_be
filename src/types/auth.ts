@@ -18,7 +18,11 @@ export enum ErrorCode {
   // Authorization Errors (403)
   AUTHORIZATION_ERROR = 'AUTHORIZATION_ERROR',
   INSUFFICIENT_PERMISSIONS = 'INSUFFICIENT_PERMISSIONS',
+  EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED',
   
+  // Conflict (409)
+  CONFLICT = 'CONFLICT',
+
   // Not Found Errors (404)
   NOT_FOUND = 'NOT_FOUND',
   USER_NOT_FOUND = 'USER_NOT_FOUND',
@@ -47,12 +51,16 @@ export interface User {
   email: string;
   passwordHash: string | null; // null for Google OAuth users
   subscriptionTier: SubscriptionTier;
+  emailVerified: boolean;
+  onboardingCompletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface AuthService {
-  register(email: string, password: string): Promise<{ user: User; token: string }>;
+  register(email: string, password: string): Promise<{ user: User }>;
+  verifyEmail(email: string, otp: string): Promise<{ user: User; token: string }>;
+  resendVerificationEmail(email: string): Promise<void>;
   login(email: string, password: string): Promise<{ user: User; token: string }>;
   validateToken(token: string): Promise<User>;
   logout(token: string): Promise<void>;
@@ -85,9 +93,22 @@ export class AuthenticationError extends AppError {
   }
 }
 
+/** Local signup must verify email before full app access; returned as 403 with EMAIL_NOT_VERIFIED. */
+export class EmailNotVerifiedError extends AppError {
+  constructor(message: string = 'Please verify your email before signing in', details?: any) {
+    super(ErrorCode.EMAIL_NOT_VERIFIED, message, 403, details);
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message: string = 'Resource not found', details?: any) {
     super(ErrorCode.NOT_FOUND, message, 404, details);
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message: string, details?: any) {
+    super(ErrorCode.CONFLICT, message, 409, details);
   }
 }
 

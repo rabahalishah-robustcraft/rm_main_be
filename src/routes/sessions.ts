@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
 import { ServiceContainer } from '../container';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { authenticate, requireEmailVerified, AuthenticatedRequest } from '../middleware/auth';
 import { enforceDataIsolation } from '../middleware/security';
 import { aiProcessingRateLimit, uploadRateLimit } from '../middleware/rateLimiting';
 import { validateRequest, validationSchemas } from '../middleware/validation';
@@ -17,6 +17,9 @@ import { formatSessionDisplayName } from '../utils/sessionDisplayName';
 export function createSessionRoutes(services: ServiceContainer): Router {
   const router = Router();
   const { audioSessionService } = services;
+
+  router.use(authenticate);
+  router.use(requireEmailVerified);
 
 // Configure multer for audio file uploads
 const upload = multer({
@@ -39,7 +42,7 @@ const upload = multer({
  * POST /api/sessions/start
  * Requirements: 3.1, 6.2, 6.3
  */
-router.post('/start', authenticate, aiProcessingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/start', aiProcessingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.id;
 
@@ -95,7 +98,6 @@ router.post('/start', authenticate, aiProcessingRateLimit, async (req: Authentic
  * Requirements: 3.2
  */
 router.post('/:id/audio', 
-  authenticate, 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.sessionId),
   uploadRateLimit, 
@@ -190,7 +192,6 @@ router.post('/:id/audio',
  * - status: filter by status - 'completed', 'processing', 'failed', 'pending', 'all' (default: 'completed')
  */
 router.get('/history', 
-  authenticate, 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.history),
   async (req: AuthenticatedRequest, res: Response) => {
@@ -280,7 +281,6 @@ router.get('/history',
  * Body: { transcript: string }
  */
 router.patch('/:id/transcript',
-  authenticate,
   enforceDataIsolation('session'),
   validateRequest(validationSchemas.sessions.updateTranscript),
   aiProcessingRateLimit,
@@ -343,7 +343,6 @@ router.patch('/:id/transcript',
  * Body: { displayName?: string }
  */
 router.patch('/:id',
-  authenticate,
   enforceDataIsolation('session'),
   validateRequest(validationSchemas.sessions.updateDisplayName),
   async (req: AuthenticatedRequest, res: Response) => {
@@ -400,7 +399,6 @@ router.patch('/:id',
  * Requirements: 3.1
  */
 router.get('/:id', 
-  authenticate, 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.sessionId),
   async (req: AuthenticatedRequest, res: Response) => {
@@ -488,7 +486,6 @@ router.get('/:id',
  * Returns a presigned URL valid for 1 hour for audio playback
  */
 router.get('/:id/audio-url', 
-  authenticate, 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.sessionId),
   async (req: AuthenticatedRequest, res: Response) => {

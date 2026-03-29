@@ -13,8 +13,8 @@
 import { ProfileService } from '../../src/services/ProfileService';
 import { S3Service } from '../../src/services/S3Service';
 import { OpenAIService } from '../../src/services/OpenAIService';
-import { AuthService } from '../../src/services/AuthService';
 import prisma from '../../src/lib/prisma';
+import { createVerifiedUserWithProfile } from './helpers/testUserFactory';
 import { ValidationError, NotFoundError } from '../../src/types/auth';
 
 // Mock the monitoring service to prevent background health checks
@@ -41,7 +41,6 @@ describe('Resume Processing Integration Tests', () => {
   let profileService: ProfileService;
   let s3Service: S3Service;
   let openaiService: OpenAIService;
-  let authService: AuthService;
   let testUserId: string;
   let testPdfBuffer: Buffer;
 
@@ -63,12 +62,10 @@ describe('Resume Processing Integration Tests', () => {
     };
     openaiService = new OpenAIService(openaiConfig);
 
-    authService = new AuthService(prisma);
     profileService = new ProfileService(s3Service, openaiService, prisma);
 
-    // Create test user
-    const testUser = await authService.register('resume-test@example.com', 'Password123!');
-    testUserId = testUser.user.id;
+    const testUser = await createVerifiedUserWithProfile('resume-test@example.com', 'Password123!');
+    testUserId = testUser.id;
 
     // Create test PDF resume
     testPdfBuffer = createTestPdfResume();
@@ -178,8 +175,8 @@ describe('Resume Processing Integration Tests', () => {
       );
 
       // Create another test user for this test
-      const testUser2 = await authService.register('resume-test2@example.com', 'Password123!');
-      const testUserId2 = testUser2.user.id;
+      const testUser2 = await createVerifiedUserWithProfile('resume-test2@example.com', 'Password123!');
+      const testUserId2 = testUser2.id;
 
       try {
         // Upload resume
@@ -305,8 +302,8 @@ describe('Resume Processing Integration Tests', () => {
 
     it('should handle resume download for user without resume', async () => {
       // Create a new user without a resume
-      const testUser3 = await authService.register('no-resume@example.com', 'Password123!');
-      const testUserId3 = testUser3.user.id;
+      const testUser3 = await createVerifiedUserWithProfile('no-resume@example.com', 'Password123!');
+      const testUserId3 = testUser3.id;
 
       try {
         // Attempt to get resume URL

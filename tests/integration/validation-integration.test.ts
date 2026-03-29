@@ -8,6 +8,8 @@ import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import container from '../../src/container';
 import { createApp } from '../../src/index';
+import { getVerifiedAuthToken } from './helpers/verifiedAuth';
+import { safeEmailVerificationOTPDeleteMany } from './helpers/safePrismaCleanup';
 
 describe('Validation Integration Tests', () => {
   let app: any;
@@ -20,15 +22,12 @@ describe('Validation Integration Tests', () => {
     prisma = services.prisma;
     app = await createApp();
 
-    // Create a test user for authenticated endpoints
-    const registerResponse = await request(app)
-      .post('/api/auth/register')
-      .send({
-        email: 'validation-test@example.com',
-        password: 'ValidPassword123!'
-      });
-
-    authToken = registerResponse.body.token;
+    const { token } = await getVerifiedAuthToken(
+      app,
+      'validation-test@example.com',
+      'ValidPassword123!'
+    );
+    authToken = token;
   });
 
   afterAll(async () => {
@@ -53,6 +52,9 @@ describe('Validation Integration Tests', () => {
           email: 'validation-test@example.com'
         }
       }
+    });
+    await safeEmailVerificationOTPDeleteMany(prisma, {
+      email: 'validation-test@example.com'
     });
     await prisma.user.deleteMany({
       where: {

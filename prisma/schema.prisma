@@ -11,14 +11,16 @@ datasource db {
 }
 
 model User {
-  id               String    @id @default(cuid())
-  email            String    @unique
-  passwordHash     String?   // nullable for Google OAuth users
-  authProvider     String    @default("local") // "local" | "google"
-  googleId         String?   @unique // Google sub claim, for linking
-  subscriptionTier String    @default("free")
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                      String    @id @default(cuid())
+  email                   String    @unique
+  passwordHash            String?   // nullable for Google OAuth users
+  authProvider            String    @default("local") // "local" | "google"
+  googleId                String?   @unique // Google sub claim, for linking
+  subscriptionTier        String    @default("free")
+  emailVerified           Boolean   @default(false)
+  onboardingCompletedAt   DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   // Relations
   profile        UserProfile?
@@ -37,6 +39,17 @@ model PasswordResetOTP {
 
   @@index([email, expiresAt])
   @@map("password_reset_otps")
+}
+
+model EmailVerificationOTP {
+  id        String   @id @default(cuid())
+  email     String
+  otpHash   String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, expiresAt])
+  @@map("email_verification_otps")
 }
 
 model UserProfile {

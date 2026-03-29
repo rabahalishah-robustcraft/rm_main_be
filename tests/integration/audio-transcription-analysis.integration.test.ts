@@ -14,8 +14,8 @@ import { AudioSessionService } from '../../src/services/AudioSessionService';
 import { S3Service } from '../../src/services/S3Service';
 import { OpenAIService } from '../../src/services/OpenAIService';
 import { SubscriptionService } from '../../src/services/SubscriptionService';
-import { AuthService } from '../../src/services/AuthService';
 import prisma from '../../src/lib/prisma';
+import { createVerifiedUserWithProfile } from './helpers/testUserFactory';
 
 // Mock the monitoring service to prevent background health checks
 jest.mock('../../src/services/MonitoringService', () => {
@@ -43,7 +43,6 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
   let s3Service: S3Service;
   let openaiService: OpenAIService;
   let subscriptionService: SubscriptionService;
-  let authService: AuthService;
   let testUserId: string;
   let testAudioBuffer: Buffer;
 
@@ -66,7 +65,6 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
     openaiService = new OpenAIService(openaiConfig);
 
     subscriptionService = new SubscriptionService(prisma);
-    authService = new AuthService(prisma);
 
     audioSessionService = new AudioSessionService(
       prisma,
@@ -75,21 +73,12 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
       subscriptionService
     );
 
-    // Create test user with profile
-    const testUser = await authService.register('audio-test@example.com', 'Password123!');
-    testUserId = testUser.user.id;
+    const testUser = await createVerifiedUserWithProfile('audio-test@example.com', 'Password123!');
+    testUserId = testUser.id;
 
-    // Create or update user profile with target role information
-    await prisma.userProfile.upsert({
+    await prisma.userProfile.update({
       where: { userId: testUserId },
-      create: {
-        userId: testUserId,
-        targetIndustry: 'Technology',
-        targetJobTitle: 'Software Engineer',
-        experienceLevel: 'mid',
-        extractedSkills: ['JavaScript', 'TypeScript', 'React']
-      },
-      update: {
+      data: {
         targetIndustry: 'Technology',
         targetJobTitle: 'Software Engineer',
         experienceLevel: 'mid',
@@ -322,8 +311,8 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
       );
 
       // Create another test user for this test
-      const testUser2 = await authService.register('audio-test2@example.com', 'Password123!');
-      const testUserId2 = testUser2.user.id;
+      const testUser2 = await createVerifiedUserWithProfile('audio-test2@example.com', 'Password123!');
+      const testUserId2 = testUser2.id;
 
       try {
         // Create session and upload audio

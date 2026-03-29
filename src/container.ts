@@ -11,6 +11,7 @@ import { config } from './utils/config';
 import { AuthService } from './services/AuthService';
 import { createEmailService } from './services/EmailService';
 import { ProfileService } from './services/ProfileService';
+import { OnboardingService } from './services/OnboardingService';
 import { AudioSessionService } from './services/AudioSessionService';
 import { SubscriptionService } from './services/SubscriptionService';
 import { DashboardService } from './services/DashboardService';
@@ -24,6 +25,7 @@ export interface ServiceContainer {
   prisma: PrismaClient;
   authService: AuthService;
   profileService: ProfileService;
+  onboardingService: OnboardingService;
   audioSessionService: AudioSessionService;
   subscriptionService: SubscriptionService;
   dashboardService: DashboardService;
@@ -111,6 +113,7 @@ class Container {
     const subscriptionService = new SubscriptionService(prisma);
     const dashboardService = new DashboardService(prisma);
     const profileService = new ProfileService(s3Service, openaiService, prisma);
+    const onboardingService = new OnboardingService(profileService, openaiService, s3Service, prisma);
     const audioSessionService = new AudioSessionService(
       prisma, 
       openaiService, 
@@ -125,6 +128,7 @@ class Container {
       prisma,
       authService,
       profileService,
+      onboardingService,
       audioSessionService,
       subscriptionService,
       dashboardService,

@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { ServiceContainer } from '../container';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { authenticate, requireEmailVerified, AuthenticatedRequest } from '../middleware/auth';
 import { enforceDataIsolation } from '../middleware/security';
 import { validateRequest, validationSchemas } from '../middleware/validation';
 import { SubscriptionError, SubscriptionTier } from '../services/SubscriptionService';
@@ -16,6 +16,7 @@ export function createSubscriptionRoutes(services: ServiceContainer): Router {
 
 // Apply authentication and data isolation to all subscription routes
 router.use(authenticate);
+router.use(requireEmailVerified);
 router.use(enforceDataIsolation('usage'));
 
 /**

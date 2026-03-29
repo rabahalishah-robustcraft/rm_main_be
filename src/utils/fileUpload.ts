@@ -90,6 +90,19 @@ export const audioUpload = multer({
 });
 
 /**
+ * Onboarding voice step: accept exactly one file part with any field name (Postman/clients vary).
+ * `limits.files: 1` still allows non-file multipart fields (e.g. text keys) alongside one upload.
+ */
+export const onboardingVoiceUpload = multer({
+  storage,
+  fileFilter: audioFileFilter,
+  limits: {
+    fileSize: S3_CONFIG.MAX_FILE_SIZE,
+    files: 1
+  }
+}).any();
+
+/**
  * Generic file validation utility
  * Requirements: 7.1
  */

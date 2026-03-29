@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { createApp } from '../../src/index';
 import { authService } from '../../src/services/AuthService';
 import { SubscriptionTier } from '../../src/services/SubscriptionService';
+import { safeEmailVerificationOTPDeleteMany } from './helpers/safePrismaCleanup';
 
 const prisma = new PrismaClient();
 
@@ -34,19 +35,29 @@ describe('Subscription Routes Integration Tests', () => {
   });
 
   beforeEach(async () => {
-    // Create test user and get auth token
-    const testUser = await authService.register(
+    const { user } = await authService.register(
       'subscription-test@example.com',
       'Password123!'
     );
-    authToken = testUser.token;
-    userId = testUser.user.id;
+    userId = user.id;
+    await prisma.user.update({
+      where: { id: userId },
+      data: { emailVerified: true }
+    });
+    await safeEmailVerificationOTPDeleteMany(prisma, {
+      email: 'subscription-test@example.com'
+    });
+    const session = await authService.login('subscription-test@example.com', 'Password123!');
+    authToken = session.token;
   });
 
   afterEach(async () => {
     // Clean up test data
     await prisma.usageTracking.deleteMany({
       where: { userId }
+    });
+    await safeEmailVerificationOTPDeleteMany(prisma, {
+      email: 'subscription-test@example.com'
     });
     await prisma.user.delete({
       where: { id: userId }

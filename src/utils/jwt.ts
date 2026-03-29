@@ -11,6 +11,8 @@ export interface JWTPayload {
   userId: string;
   email: string;
   subscriptionTier: string;
+  /** Present on all newly issued access tokens; omitted in legacy tokens (verify treats missing as true). */
+  emailVerified: boolean;
   iat?: number;
   exp?: number;
 }
@@ -49,7 +51,11 @@ class JWTUtils {
    */
   generateToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): string {
     try {
-      return jwt.sign(payload, this.config.secret, {
+      const body: Omit<JWTPayload, 'iat' | 'exp'> = {
+        ...payload,
+        emailVerified: payload.emailVerified
+      };
+      return jwt.sign(body, this.config.secret, {
         expiresIn: this.config.expiresIn,
         issuer: this.config.issuer,
         algorithm: 'HS256'
@@ -68,6 +74,10 @@ class JWTUtils {
         issuer: this.config.issuer,
         algorithms: ['HS256']
       }) as JWTPayload;
+
+      if (typeof decoded.emailVerified !== 'boolean') {
+        decoded.emailVerified = true;
+      }
 
       return decoded;
     } catch (error) {

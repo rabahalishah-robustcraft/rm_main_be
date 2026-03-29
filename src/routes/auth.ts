@@ -51,14 +51,57 @@ export function createAuthRoutes(services: ServiceContainer): Router {
       const { email, password }: RegisterRequest = req.body;
 
       const result = await authService.register(email, password);
-      
+
       res.status(201).json({
         success: true,
-        message: 'User registered successfully',
+        message: 'Account created. Check your email for a verification code.',
+        data: {
+          user: toSafeUser(result.user)
+        }
+      });
+    })
+  );
+
+  /**
+   * Verify email with OTP (local signup). Returns session JWT.
+   * POST /api/auth/verify-email
+   */
+  router.post(
+    '/verify-email',
+    passwordResetRateLimit,
+    validateRequest(validationSchemas.auth.verifyEmail),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { email, otp } = req.body;
+
+      const result = await authService.verifyEmail(email, otp);
+
+      res.status(200).json({
+        success: true,
+        message: 'Email verified successfully',
         data: {
           user: toSafeUser(result.user),
           token: result.token
         }
+      });
+    })
+  );
+
+  /**
+   * Resend signup verification OTP
+   * POST /api/auth/resend-verification
+   */
+  router.post(
+    '/resend-verification',
+    passwordResetRateLimit,
+    validateRequest(validationSchemas.auth.resendVerification),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { email } = req.body;
+
+      await authService.resendVerificationEmail(email);
+
+      res.status(200).json({
+        success: true,
+        message: 'If an account exists and needs verification, you will receive an email.'
       });
     })
   );
@@ -132,6 +175,8 @@ export function createAuthRoutes(services: ServiceContainer): Router {
         id: user.id,
         email: user.email,
         subscriptionTier: user.subscriptionTier,
+        emailVerified: user.emailVerified,
+        onboardingCompletedAt: user.onboardingCompletedAt,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
       });
@@ -299,7 +344,8 @@ export function createAuthRoutes(services: ServiceContainer): Router {
         user: {
           id: req.user!.id,
           email: req.user!.email,
-          subscriptionTier: req.user!.subscriptionTier
+          subscriptionTier: req.user!.subscriptionTier,
+          emailVerified: req.user!.emailVerified
         }
       });
     })

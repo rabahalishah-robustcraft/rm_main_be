@@ -59,6 +59,11 @@ if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
  */
 export const createRateLimit = (config: RateLimitConfig) => {
   return (req: Request, res: Response, next: NextFunction): void => {
+    if (process.env.JEST_WORKER_ID !== undefined) {
+      next();
+      return;
+    }
+
     const clientId = getClientIdentifier(req);
     const now = Date.now();
 
@@ -178,6 +183,11 @@ export const progressiveRateLimit = (baseConfig: RateLimitConfig) => {
   const violationStore = new Map<string, { count: number; lastViolation: number }>();
 
   return (req: Request, res: Response, next: NextFunction): void => {
+    if (process.env.JEST_WORKER_ID !== undefined) {
+      next();
+      return;
+    }
+
     const clientId = getClientIdentifier(req);
     const now = Date.now();
 

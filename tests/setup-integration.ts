@@ -11,21 +11,8 @@ const prisma = new PrismaClient({
   }
 });
 
-beforeEach(async () => {
-  // Clean PostgreSQL public schema before each test run (excluding Prisma migrations table)
-  const tables = await prisma.$queryRaw<Array<{ tablename: string }>>`
-    SELECT tablename
-    FROM pg_tables
-    WHERE schemaname = 'public'
-      AND tablename <> '_prisma_migrations';
-  `;
-
-  for (const { tablename } of tables) {
-    // Restart identity to reset sequences; cascade to handle FKs
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-    await prisma.$executeRawUnsafe(`TRUNCATE TABLE "${tablename}" RESTART IDENTITY CASCADE;`);
-  }
-});
+// Do not truncate the schema before every test: multi-step suites keep users/tokens across
+// `it` blocks, and the app uses the same DATABASE_URL. Suites should clean up in afterAll/afterEach.
 
 afterAll(async () => {
   await prisma.$disconnect();

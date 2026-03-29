@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ServiceContainer } from '../container';
 import { createAuthRoutes } from './auth';
 import { createProfileRoutes } from './profile';
+import { createOnboardingRoutes } from './onboarding';
 import { createSessionRoutes } from './sessions';
 import { createSubscriptionRoutes } from './subscription';
 import { createDashboardRoutes } from './dashboard';
@@ -16,6 +17,8 @@ export function createApiRoutes(services: ServiceContainer): Router {
 
   // Mount profile routes
   router.use('/profile', createProfileRoutes(services));
+
+  router.use('/onboarding', createOnboardingRoutes(services));
 
   // Mount session routes
   router.use('/sessions', createSessionRoutes(services));
@@ -60,7 +63,15 @@ export function createApiRoutes(services: ServiceContainer): Router {
           'POST /api/auth/verify-otp': 'Verify OTP, get reset token',
           'POST /api/auth/reset-password': 'Reset password with reset token',
           'POST /api/auth/change-password': 'Change password (authenticated)',
-          'POST /api/auth/change-email': 'Change email (authenticated, password required)'
+          'POST /api/auth/change-email': 'Change email (authenticated, password required)',
+          'POST /api/auth/verify-email': 'Verify signup OTP, get session JWT',
+          'POST /api/auth/resend-verification': 'Resend signup verification email'
+        },
+        onboarding: {
+          'POST /api/onboarding/primary': 'Onboarding step 1: resume or manual profile',
+          'POST /api/onboarding/voice': 'Optional: audio intro, merge into profile',
+          'POST /api/onboarding/primary/voice': 'Same as /onboarding/voice',
+          'POST /api/onboarding/complete': 'Finish onboarding, set personalization context'
         },
         profile: {
           'GET /api/profile': 'Get user profile',

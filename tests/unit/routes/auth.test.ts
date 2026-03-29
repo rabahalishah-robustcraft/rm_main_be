@@ -34,15 +34,14 @@ describe('Authentication Routes', () => {
         email: 'test@example.com',
         passwordHash: 'hashed-password',
         subscriptionTier: SubscriptionTier.FREE,
+        emailVerified: false,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
       };
 
-      const mockToken = 'jwt-token-123';
-
       mockAuthService.register.mockResolvedValue({
-        user: mockUser,
-        token: mockToken
+        user: mockUser
       });
 
       const response = await request(app)
@@ -56,7 +55,7 @@ describe('Authentication Routes', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.data.user.email).toBe('test@example.com');
       expect(response.body.data.user.subscriptionTier).toBe(SubscriptionTier.FREE);
-      expect(response.body.data.token).toBe(mockToken);
+      expect(response.body.data.token).toBeUndefined();
       expect(response.body.data.user.passwordHash).toBeUndefined(); // Should not expose password hash
     });
 
@@ -101,6 +100,8 @@ describe('Authentication Routes', () => {
         email: 'test@example.com',
         passwordHash: 'hashed-password',
         subscriptionTier: SubscriptionTier.FREE,
+        emailVerified: true,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
       };

@@ -14,15 +14,14 @@
 import { ProfileService } from '../../src/services/ProfileService';
 import { S3Service } from '../../src/services/S3Service';
 import { OpenAIService, ResumeData } from '../../src/services/OpenAIService';
-import { AuthService } from '../../src/services/AuthService';
 import prisma from '../../src/lib/prisma';
+import { createVerifiedUserWithProfile } from './helpers/testUserFactory';
 import { ValidationError, NotFoundError } from '../../src/types/auth';
 
 describe('Resume Upload and Processing - Integration Test', () => {
   let profileService: ProfileService;
   let s3Service: S3Service;
   let openaiService: OpenAIService;
-  let authService: AuthService;
   let testUserId: string;
   let testPdfBuffer: Buffer;
 
@@ -44,12 +43,10 @@ describe('Resume Upload and Processing - Integration Test', () => {
     };
     openaiService = new OpenAIService(openaiConfig);
 
-    authService = new AuthService(prisma);
     profileService = new ProfileService(s3Service, openaiService, prisma);
 
-    // Create test user
-    const testUser = await authService.register('resume-simple-test@example.com', 'Password123!');
-    testUserId = testUser.user.id;
+    const testUser = await createVerifiedUserWithProfile('resume-simple-test@example.com', 'Password123!');
+    testUserId = testUser.id;
 
     // Create test PDF resume
     testPdfBuffer = createTestPdfResume();

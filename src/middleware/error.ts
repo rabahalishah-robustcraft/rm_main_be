@@ -322,13 +322,27 @@ function logError(error: Error, req: Request): void {
  * 404 Not Found handler
  */
 export const notFoundHandler = (req: Request, res: Response): void => {
+  const path = req.path;
+  let message = 'Endpoint not found';
+  let details: Record<string, string> | undefined;
+
+  if (path.startsWith('/api/api')) {
+    message =
+      'URL contains /api twice. Set your client base URL to the origin only (e.g. http://localhost:3000), then use paths like /api/onboarding/voice.';
+    details = {
+      receivedPath: path,
+      hint: 'If base_url is already http://host:port/api, request only /onboarding/... not /api/onboarding/...'
+    };
+  }
+
   const errorResponse: ErrorResponse = {
     error: {
       code: ErrorCode.NOT_FOUND,
-      message: 'Endpoint not found'
+      message,
+      ...(details && { details })
     },
     timestamp: new Date().toISOString(),
-    path: req.path
+    path
   };
 
   res.status(404).json(errorResponse);
