@@ -38,7 +38,7 @@ dotenv.config();
 
 // Create the Express app with all middleware and routes (without listening)
 async function createApp() {
-  console.log('🚀 AI Audio Summarization Backend starting...');
+  console.log('Recruit Me AI Backend starting...');
 
   const validation = await runStartupValidation();
 

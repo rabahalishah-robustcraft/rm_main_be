@@ -131,7 +131,7 @@ Get current user info.
 
 **Auth:** Yes
 
-**Response:** `200` — `{ id, email, subscriptionTier, emailVerified, onboardingCompletedAt, createdAt, updatedAt }`  
+**Response:** `200` — `{ id, email, subscriptionTier, emailVerified, pendingEmail, onboardingCompletedAt, createdAt, updatedAt }` — `pendingEmail` is set while a settings email change awaits OTP confirmation.  
 **Errors:** `401`
 
 ---
@@ -184,7 +184,7 @@ Verify OTP and receive reset token.
 
 ### POST /api/auth/reset-password
 
-Reset password using reset token.
+Reset password using the short-lived **reset token** from `verify-otp`. Use this for users who are **logged out** (e.g. login page “Forgot password”). Do **not** use `change-password` without a session; that endpoint is for authenticated users who know their current password.
 
 **Request body:** `{ resetToken: string, newPassword: string }` — newPassword same rules as register
 
@@ -207,13 +207,45 @@ Change password (authenticated). Current password required.
 
 ---
 
-### POST /api/auth/change-email
+### POST /api/auth/change-email/request
 
-Change email (authenticated). Password required.
+Start an email change (authenticated). Re-authenticates with **password**, stores a **pending** new address, sends a 6-digit OTP to that address (Resend). The account **login email** does not change until confirm succeeds.
+
+**Auth:** Yes  
+**Rate limit:** Yes (auth)
 
 **Request body:** `{ newEmail: string, password: string }`
 
-**Response:** `200` — `{ success, message, user }`  
+**Response:** `200` — `{ success, message, user }` — `user` includes `pendingEmail` when a code was sent; if `newEmail` equals the current email, pending state is cleared and no email is sent.
+
+**Errors:** `400`, `401`, `502` (email could not be sent — pending is not left in a half-applied state)
+
+---
+
+### POST /api/auth/change-email/confirm
+
+Confirm the pending email with the OTP from the new inbox. Returns a **new JWT** — replace the stored access token so `email` in the payload matches the updated account.
+
+**Auth:** Yes  
+**Rate limit:** Yes (password-reset class)
+
+**Request body:** `{ otp: string }` — 6 digits, numeric
+
+**Response:** `200` — `{ success, message, data: { user, token } }`  
+**Errors:** `400`, `401`
+
+---
+
+### POST /api/auth/change-email/resend
+
+Resend the confirmation OTP to the current **pending** new email.
+
+**Auth:** Yes  
+**Rate limit:** Yes (password-reset class)
+
+**Request body:** `{}` (empty JSON object)
+
+**Response:** `200` — `{ success, message }`  
 **Errors:** `400`, `401`
 
 ---
@@ -224,7 +256,7 @@ Validate JWT. Returns minimal user if valid.
 
 **Auth:** Yes
 
-**Response:** `200` — `{ success, message, user: { id, email, subscriptionTier, emailVerified } }`  
+**Response:** `200` — `{ success, message, user: { id, email, subscriptionTier, emailVerified, pendingEmail } }`  
 **Errors:** `401`
 
 ---

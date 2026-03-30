@@ -163,7 +163,7 @@ export const validationSchemas = {
         })
       })
     },
-    changeEmail: {
+    changeEmailRequest: {
       body: Joi.object({
         newEmail: Joi.string().email().required().messages({
           'string.email': 'Must be a valid email address',
@@ -173,6 +173,17 @@ export const validationSchemas = {
           'any.required': 'Password is required to verify your identity'
         })
       })
+    },
+    changeEmailConfirm: {
+      body: Joi.object({
+        otp: Joi.string().length(6).pattern(/^\d+$/).required().messages({
+          'string.length': 'OTP must be 6 digits',
+          'string.pattern.base': 'OTP must contain only numbers'
+        })
+      })
+    },
+    changeEmailResend: {
+      body: Joi.object({})
     }
   },
 

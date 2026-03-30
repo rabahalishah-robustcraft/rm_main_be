@@ -3,7 +3,8 @@ import {
   SubscriptionTier,
   AuthenticationError,
   ValidationError,
-  EmailNotVerifiedError
+  EmailNotVerifiedError,
+  ExternalServiceError
 } from '@/types/auth';
 
 // Mock the dependencies
@@ -21,6 +22,7 @@ jest.mock('@/utils/jwt', () => ({
 jest.mock('@/lib/prisma', () => {
   const mockUser = {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -50,6 +52,7 @@ const mockEmailService = {
   isConfigured: jest.fn(() => true),
   sendOTP: jest.fn(),
   sendEmailVerificationOTP: jest.fn().mockResolvedValue(undefined),
+  sendEmailChangeConfirmationOTP: jest.fn().mockResolvedValue(undefined),
 };
 
 import * as passwordUtils from '@/utils/password';
@@ -68,6 +71,7 @@ describe('AuthService Functional Tests', () => {
     jest.clearAllMocks();
     mockEmailService.isConfigured.mockReturnValue(true);
     mockEmailService.sendEmailVerificationOTP.mockResolvedValue(undefined);
+    mockEmailService.sendEmailChangeConfirmationOTP.mockResolvedValue(undefined);
   });
 
   describe('register', () => {
@@ -106,6 +110,7 @@ describe('AuthService Functional Tests', () => {
           passwordHash: hashedPassword,
           subscriptionTier: SubscriptionTier.FREE,
           emailVerified: false,
+          pendingEmail: null,
           onboardingCompletedAt: null,
           createdAt: mockDbUser.createdAt,
           updatedAt: mockDbUser.updatedAt,
@@ -254,6 +259,7 @@ describe('AuthService Functional Tests', () => {
           passwordHash: hashedPassword,
           subscriptionTier: SubscriptionTier.FREE,
           emailVerified: true,
+          pendingEmail: null,
           onboardingCompletedAt: null,
           createdAt: mockDbUser.createdAt,
           updatedAt: mockDbUser.updatedAt,
@@ -351,6 +357,7 @@ describe('AuthService Functional Tests', () => {
         passwordHash: 'hashed_password_123',
         subscriptionTier: SubscriptionTier.FREE,
         emailVerified: true,
+        pendingEmail: null,
         onboardingCompletedAt: null,
         createdAt: mockDbUser.createdAt,
         updatedAt: mockDbUser.updatedAt,
@@ -397,6 +404,7 @@ describe('AuthService Functional Tests', () => {
         passwordHash: 'hashed_password_123',
         subscriptionTier: SubscriptionTier.FREE,
         emailVerified: true,
+        pendingEmail: null,
         onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -418,6 +426,7 @@ describe('AuthService Functional Tests', () => {
         passwordHash: 'hashed_password_123',
         subscriptionTier: SubscriptionTier.FREE,
         emailVerified: true,
+        pendingEmail: null,
         onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -436,6 +445,119 @@ describe('AuthService Functional Tests', () => {
         subscriptionTier: SubscriptionTier.FREE,
         emailVerified: true,
       });
+    });
+  });
+
+  describe('requestEmailChange', () => {
+    const baseUser = {
+      id: 'u1',
+      email: 'old@example.com',
+      passwordHash: 'hash',
+      authProvider: 'local',
+      subscriptionTier: 'free',
+      emailVerified: true,
+      pendingEmail: null,
+      onboardingCompletedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    beforeEach(() => {
+      mockPasswordUtils.verifyPassword.mockResolvedValue(true);
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.emailVerificationOTP.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.emailVerificationOTP.create.mockResolvedValue({ id: 'otp' });
+    });
+
+    it('sets pending email and sends confirmation OTP', async () => {
+      const updated = { ...baseUser, pendingEmail: 'new@example.com' };
+      mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user.update.mockResolvedValue(updated);
+
+      const result = await authService.requestEmailChange('u1', 'new@example.com', 'password');
+
+      expect(result.pendingEmail).toBe('new@example.com');
+      expect(mockEmailService.sendEmailChangeConfirmationOTP).toHaveBeenCalledWith(
+        'new@example.com',
+        expect.stringMatching(/^\d{6}$/)
+      );
+    });
+
+    it('clears pending when new email equals current', async () => {
+      const cleared = { ...baseUser, pendingEmail: null };
+      mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user.update.mockResolvedValue(cleared);
+
+      const result = await authService.requestEmailChange('u1', 'old@example.com', 'password');
+
+      expect(result.pendingEmail).toBeNull();
+      expect(mockEmailService.sendEmailChangeConfirmationOTP).not.toHaveBeenCalled();
+    });
+
+    it('throws when email send fails and reverts pending', async () => {
+      const updated = { ...baseUser, pendingEmail: 'new@example.com' };
+      mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user.update.mockResolvedValue(updated);
+      mockEmailService.sendEmailChangeConfirmationOTP.mockRejectedValue(new Error('resend down'));
+
+      await expect(
+        authService.requestEmailChange('u1', 'new@example.com', 'password')
+      ).rejects.toThrow(ExternalServiceError);
+
+      expect(mockPrisma.emailVerificationOTP.deleteMany).toHaveBeenCalled();
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { pendingEmail: null }
+      });
+    });
+  });
+
+  describe('confirmEmailChange', () => {
+    it('applies pending email and returns new token', async () => {
+      const withPending = {
+        id: 'u1',
+        email: 'old@example.com',
+        pendingEmail: 'new@example.com',
+        passwordHash: 'h',
+        authProvider: 'local',
+        subscriptionTier: 'free',
+        emailVerified: true,
+        onboardingCompletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      const finalUser = {
+        ...withPending,
+        email: 'new@example.com',
+        pendingEmail: null,
+        emailVerified: true
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(withPending);
+      mockPrisma.emailVerificationOTP.findMany.mockResolvedValue([
+        {
+          id: 'o1',
+          email: 'new@example.com',
+          otpHash: 'h',
+          expiresAt: new Date(Date.now() + 60000),
+          createdAt: new Date()
+        }
+      ]);
+      mockPasswordUtils.verifyPassword.mockResolvedValue(true);
+      mockPrisma.emailVerificationOTP.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.user.update.mockResolvedValue(finalUser);
+      mockJwtUtils.generateToken.mockReturnValue('jwt-new');
+
+      const result = await authService.confirmEmailChange('u1', '123456');
+
+      expect(result.user.email).toBe('new@example.com');
+      expect(result.token).toBe('jwt-new');
+      expect(mockJwtUtils.generateToken).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'u1',
+          email: 'new@example.com',
+          emailVerified: true
+        })
+      );
     });
   });
 });

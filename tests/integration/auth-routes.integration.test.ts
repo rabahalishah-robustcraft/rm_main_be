@@ -17,7 +17,9 @@ const mockAuthService = {
   resendVerificationEmail: jest.fn(),
   resetPassword: jest.fn(),
   changePassword: jest.fn(),
-  changeEmail: jest.fn(),
+  requestEmailChange: jest.fn(),
+  confirmEmailChange: jest.fn(),
+  resendEmailChangeOtp: jest.fn(),
 };
 
 // Mock Prisma to avoid database dependencies
@@ -52,6 +54,7 @@ describe('Authentication Routes Integration', () => {
         passwordHash: 'hashed-password',
         subscriptionTier: SubscriptionTier.FREE,
         emailVerified: false,
+        pendingEmail: null,
         onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -124,6 +127,7 @@ describe('Authentication Routes Integration', () => {
         passwordHash: 'hashed-password',
         subscriptionTier: SubscriptionTier.FREE,
         emailVerified: true,
+        pendingEmail: null,
         onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()

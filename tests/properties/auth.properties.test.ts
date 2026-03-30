@@ -54,6 +54,7 @@ const mockEmailService = {
   isConfigured: jest.fn(() => true),
   sendOTP: jest.fn(),
   sendEmailVerificationOTP: jest.fn().mockResolvedValue(undefined),
+  sendEmailChangeConfirmationOTP: jest.fn().mockResolvedValue(undefined),
 };
 
 describe('Authentication Property Tests', () => {

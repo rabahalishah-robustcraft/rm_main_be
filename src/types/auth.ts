@@ -52,6 +52,7 @@ export interface User {
   passwordHash: string | null; // null for Google OAuth users
   subscriptionTier: SubscriptionTier;
   emailVerified: boolean;
+  pendingEmail: string | null;
   onboardingCompletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

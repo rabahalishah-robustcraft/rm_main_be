@@ -35,6 +35,7 @@ describe('Authentication Routes', () => {
         passwordHash: 'hashed-password',
         subscriptionTier: SubscriptionTier.FREE,
         emailVerified: false,
+        pendingEmail: null,
         onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -101,6 +102,7 @@ describe('Authentication Routes', () => {
         passwordHash: 'hashed-password',
         subscriptionTier: SubscriptionTier.FREE,
         emailVerified: true,
+        pendingEmail: null,
         onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()

@@ -9,6 +9,7 @@ interface User {
   passwordHash: string | null;
   subscriptionTier: SubscriptionTier;
   emailVerified: boolean;
+  pendingEmail: string | null;
   onboardingCompletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -72,6 +73,7 @@ export const authenticate = async (
       passwordHash: user.passwordHash,
       subscriptionTier: user.subscriptionTier as SubscriptionTier,
       emailVerified: user.emailVerified,
+      pendingEmail: user.pendingEmail ?? null,
       onboardingCompletedAt: user.onboardingCompletedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt
@@ -142,6 +144,7 @@ export const optionalAuthenticate = async (
           passwordHash: user.passwordHash,
           subscriptionTier: user.subscriptionTier as SubscriptionTier,
           emailVerified: user.emailVerified,
+          pendingEmail: user.pendingEmail ?? null,
           onboardingCompletedAt: user.onboardingCompletedAt,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt

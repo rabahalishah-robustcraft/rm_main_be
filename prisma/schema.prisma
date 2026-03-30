@@ -18,6 +18,7 @@ model User {
   googleId                String?   @unique // Google sub claim, for linking
   subscriptionTier        String    @default("free")
   emailVerified           Boolean   @default(false)
+  pendingEmail            String?   @unique // proposed address until verified via OTP
   onboardingCompletedAt   DateTime?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt

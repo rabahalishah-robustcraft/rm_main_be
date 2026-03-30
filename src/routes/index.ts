@@ -63,7 +63,9 @@ export function createApiRoutes(services: ServiceContainer): Router {
           'POST /api/auth/verify-otp': 'Verify OTP, get reset token',
           'POST /api/auth/reset-password': 'Reset password with reset token',
           'POST /api/auth/change-password': 'Change password (authenticated)',
-          'POST /api/auth/change-email': 'Change email (authenticated, password required)',
+          'POST /api/auth/change-email/request': 'Start email change (password + new email, OTP to new address)',
+          'POST /api/auth/change-email/confirm': 'Confirm email change with OTP (returns new JWT)',
+          'POST /api/auth/change-email/resend': 'Resend email change OTP',
           'POST /api/auth/verify-email': 'Verify signup OTP, get session JWT',
           'POST /api/auth/resend-verification': 'Resend signup verification email'
         },
