@@ -1,6 +1,7 @@
 import { PrismaClient, AudioSession, UserProfile } from '@prisma/client';
+import { parseBuffer } from 'music-metadata';
 import { S3Service } from './S3Service';
-import { SubscriptionService, SubscriptionError } from './SubscriptionService';
+import { SubscriptionService, SubscriptionError, SubscriptionTier } from './SubscriptionService';
 import { sanitizeFilename } from '../utils/fileUpload';
 import { formatSessionDisplayName } from '../utils/sessionDisplayName';
 import { config } from '../utils/config';
@@ -48,6 +49,67 @@ const IN_FLIGHT_STATUSES = [
   SessionStatus.AWAITING_REVIEW,
   SessionStatus.ANALYZING
 ];
+
+/** Max interview recording length (seconds) for real-time session upload by subscription tier. */
+const INTERVIEW_AUDIO_MAX_SECONDS: Record<SubscriptionTier, number> = {
+  [SubscriptionTier.FREE]: 25 * 60,
+  [SubscriptionTier.PAID]: 3 * 60 * 60
+};
+
+/**
+ * Duration from a linear PCM WAVE file (fmt + data chunks). Returns undefined if not PCM RIFF/WAVE.
+ */
+function wavPcmDurationSeconds(buffer: Buffer): number | undefined {
+  if (buffer.length < 36) return undefined;
+  if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') {
+    return undefined;
+  }
+  let offset = 12;
+  let byteRate = 0;
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString('ascii', offset, offset + 4);
+    const size = buffer.readUInt32LE(offset + 4);
+    const chunkStart = offset + 8;
+    if (chunkStart + size > buffer.length) {
+      return undefined;
+    }
+    if (id === 'fmt ') {
+      if (size < 16) return undefined;
+      const audioFormat = buffer.readUInt16LE(chunkStart);
+      if (audioFormat !== 1) {
+        return undefined;
+      }
+      byteRate = buffer.readUInt32LE(chunkStart + 8);
+    } else if (id === 'data') {
+      if (byteRate > 0 && size > 0) {
+        return size / byteRate;
+      }
+      return undefined;
+    }
+    offset = chunkStart + size + (size % 2);
+  }
+  return undefined;
+}
+
+async function readAudioDurationSeconds(
+  buffer: Buffer,
+  mimeType: string
+): Promise<number | undefined> {
+  const fromWav = wavPcmDurationSeconds(buffer);
+  if (fromWav !== undefined && Number.isFinite(fromWav) && fromWav >= 0) {
+    return fromWav;
+  }
+  try {
+    const meta = await parseBuffer(buffer, mimeType || undefined);
+    const d = meta.format.duration;
+    if (typeof d === 'number' && Number.isFinite(d) && d >= 0) {
+      return d;
+    }
+  } catch {
+    // Unsupported or corrupt container; caller treats as unknown duration
+  }
+  return undefined;
+}
 
 /**
  * Custom error class for AudioSession service errors
@@ -145,6 +207,26 @@ export class AudioSessionService {
 
       await this.getProfileForUserOrThrow(session.userId);
 
+      const usage = await this.subscriptionService.getUsageInfo(session.userId);
+      const tier =
+        usage.tier === SubscriptionTier.PAID ? SubscriptionTier.PAID : SubscriptionTier.FREE;
+      const maxAudioSeconds = INTERVIEW_AUDIO_MAX_SECONDS[tier];
+
+      const durationSeconds = await readAudioDurationSeconds(audioBuffer, contentType);
+      if (durationSeconds === undefined) {
+        throw new AudioSessionError(
+          'Could not determine audio length. Please upload a supported format (for example WAV, MP3, or M4A).',
+          'AUDIO_DURATION_UNKNOWN'
+        );
+      }
+      if (durationSeconds > maxAudioSeconds) {
+        const limitLabel = tier === SubscriptionTier.PAID ? '3 hours' : '25 minutes';
+        throw new AudioSessionError(
+          `Interview audio exceeds the maximum length (${limitLabel}) for your plan.`,
+          'INTERVIEW_AUDIO_LENGTH_LIMIT_EXCEEDED'
+        );
+      }
+
       if (!config.ASSEMBLYAI_API_KEY) {
         throw new AudioSessionError(
           'AssemblyAI is not configured on the server',
@@ -210,6 +292,9 @@ export class AudioSessionService {
     } catch (error) {
       if (error instanceof AudioSessionError) {
         throw error;
+      }
+      if (error instanceof SubscriptionError) {
+        throw new AudioSessionError(error.message, error.code, error);
       }
       throw new AudioSessionError(
         'Failed to upload audio',
