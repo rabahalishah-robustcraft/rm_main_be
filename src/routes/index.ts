@@ -4,6 +4,7 @@ import { createAuthRoutes } from './auth';
 import { createProfileRoutes } from './profile';
 import { createOnboardingRoutes } from './onboarding';
 import { createSessionRoutes } from './sessions';
+import { createPracticeRoutes } from './practice';
 import { createWebhookRoutes } from './webhooks';
 import { createSubscriptionRoutes } from './subscription';
 import { createDashboardRoutes } from './dashboard';
@@ -23,6 +24,8 @@ export function createApiRoutes(services: ServiceContainer): Router {
 
   // Mount session routes
   router.use('/sessions', createSessionRoutes(services));
+
+  router.use('/practice', createPracticeRoutes(services));
 
   // AssemblyAI webhooks (no JWT; secret header verification)
   router.use('/webhooks', createWebhookRoutes(services));
@@ -95,7 +98,12 @@ export function createApiRoutes(services: ServiceContainer): Router {
           'PATCH /api/sessions/:id/transcript': 'Submit edited compact transcript array for coaching analysis',
           'PATCH /api/sessions/:id': 'Update session display name (event label)',
           'GET /api/sessions/:id': 'Get session details',
-          'GET /api/sessions/history': 'Get session history'
+          'GET /api/sessions/history': 'Get session history (optional query sessionType=interview|practice|all)'
+        },
+        practice: {
+          'GET /api/practice/questions': 'Get 3 cached or generated practice questions (?refresh=true to force)',
+          'POST /api/practice/sessions': 'Submit practice audio + question; returns coaching report (multipart)',
+          'PATCH /api/practice/sessions/:id': 'Re-analyze edited answer text in place (JSON body: transcript)'
         },
         webhooks: {
           'POST /api/webhooks/assemblyai': 'AssemblyAI transcription completion callback (no JWT)'

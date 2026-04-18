@@ -93,6 +93,7 @@ export class AudioSessionService {
       const session = await this.prisma.audioSession.create({
         data: {
           userId,
+          sessionType: 'interview',
           audioS3Key: '',
           status: SessionStatus.PENDING,
           displayName: formatSessionDisplayName(now)
@@ -463,10 +464,15 @@ export class AudioSessionService {
   async getSessionHistory(
     userId: string,
     limit: number = 20,
-    statusFilter: string = 'completed'
+    statusFilter: string = 'completed',
+    sessionTypeFilter: 'interview' | 'practice' | 'all' = 'all'
   ): Promise<AudioSession[]> {
     try {
-      const whereClause: { userId: string; status?: string | { in: string[] } } = { userId };
+      const whereClause: {
+        userId: string;
+        status?: string | { in: string[] };
+        sessionType?: string;
+      } = { userId };
 
       if (statusFilter !== 'all') {
         if (statusFilter === 'processing') {
@@ -474,6 +480,10 @@ export class AudioSessionService {
         } else {
           whereClause.status = statusFilter;
         }
+      }
+
+      if (sessionTypeFilter !== 'all') {
+        whereClause.sessionType = sessionTypeFilter;
       }
 
       const sessions = await this.prisma.audioSession.findMany({

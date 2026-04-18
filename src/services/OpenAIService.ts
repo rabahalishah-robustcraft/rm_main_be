@@ -15,6 +15,10 @@ const CHARS_PER_TOKEN = 4; // Approximate: 1 token ≈ 4 characters
 const MAX_GPT_TOKENS = 8000; // Conservative limit for GPT-4 context window
 const MAX_AUDIO_SIZE = FILE_SIZE_LIMITS.AUDIO; // 50MB
 
+/** Returned when Whisper retries are exhausted; practice flow must reject this as a hard failure. */
+export const WHISPER_TRANSCRIPTION_PLACEHOLDER =
+  '[Transcription temporarily unavailable - please try again later]';
+
 export interface TranscriptionResult {
   text: string;
   language?: string;
@@ -220,7 +224,11 @@ export class OpenAIService {
    * Transcribe audio using OpenAI Whisper API with comprehensive error handling
    * Requirements: 8.1, 8.2, 8.3, 8.5, 1.1, 1.2, 9.1, 9.5
    */
-  async transcribeAudio(audioBuffer: Buffer, filename: string = 'audio.wav'): Promise<TranscriptionResult> {
+  async transcribeAudio(
+    audioBuffer: Buffer,
+    filename: string = 'audio.wav',
+    mimeType: string = 'audio/wav'
+  ): Promise<TranscriptionResult> {
     // Requirement 9.1: Validate audio buffer before API call
     this.validateAudioBuffer(audioBuffer);
 
@@ -239,7 +247,7 @@ export class OpenAIService {
     try {
       const result = await errorHandlingService.executeOpenAIOperation(
         async () => {
-          const file = new File([audioBuffer], filename, { type: 'audio/wav' });
+          const file = new File([audioBuffer], filename, { type: mimeType || 'audio/wav' });
           
           // Use whisperClient for transcription operations
           // Requirements: 1.1, 1.2
@@ -268,7 +276,7 @@ export class OpenAIService {
           });
           
           return {
-            text: '[Transcription temporarily unavailable - please try again later]',
+            text: WHISPER_TRANSCRIPTION_PLACEHOLDER,
             language: 'en',
             duration: 0
           };

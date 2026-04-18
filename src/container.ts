@@ -13,6 +13,8 @@ import { createEmailService } from './services/EmailService';
 import { ProfileService } from './services/ProfileService';
 import { OnboardingService } from './services/OnboardingService';
 import { AudioSessionService } from './services/AudioSessionService';
+import { PracticeSessionService } from './services/practiceSessionService';
+import { QuestionService } from './services/questionService';
 import { SubscriptionService } from './services/SubscriptionService';
 import { DashboardService } from './services/DashboardService';
 import { OpenAIService } from './services/OpenAIService';
@@ -27,6 +29,8 @@ export interface ServiceContainer {
   profileService: ProfileService;
   onboardingService: OnboardingService;
   audioSessionService: AudioSessionService;
+  questionService: QuestionService;
+  practiceSessionService: PracticeSessionService;
   subscriptionService: SubscriptionService;
   dashboardService: DashboardService;
   
@@ -115,6 +119,13 @@ class Container {
     const profileService = new ProfileService(s3Service, openaiService, prisma);
     const onboardingService = new OnboardingService(profileService, openaiService, s3Service, prisma);
     const audioSessionService = new AudioSessionService(prisma, s3Service, subscriptionService);
+    const questionService = new QuestionService(prisma);
+    const practiceSessionService = new PracticeSessionService(
+      prisma,
+      openaiService,
+      s3Service,
+      subscriptionService
+    );
 
     console.log('✅ Core services initialized');
 
@@ -125,6 +136,8 @@ class Container {
       profileService,
       onboardingService,
       audioSessionService,
+      questionService,
+      practiceSessionService,
       subscriptionService,
       dashboardService,
       openaiService,

@@ -24,9 +24,10 @@ model User {
   updatedAt               DateTime  @updatedAt
 
   // Relations
-  profile        UserProfile?
-  audioSessions  AudioSession[]
-  usageTracking  UsageTracking[]
+  profile           UserProfile?
+  audioSessions     AudioSession[]
+  usageTracking     UsageTracking[]
+  practiceQuestions PracticeQuestion[]
 
   @@map("users")
 }
@@ -90,6 +91,7 @@ model UserProfile {
 model AudioSession {
   id               String    @id @default(cuid())
   userId           String
+  sessionType      String    @default("interview") // "interview" | "practice"
   audioS3Key       String
   displayName      String?   // User-editable event label/name
   transcript       String?
@@ -114,6 +116,19 @@ model AudioSession {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("audio_sessions")
+}
+
+model PracticeQuestion {
+  id          String   @id @default(cuid())
+  userId      String
+  questions   Json
+  generatedAt DateTime @default(now())
+  industry    String?
+  jobTitle    String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("practice_questions")
 }
 
 model UsageTracking {

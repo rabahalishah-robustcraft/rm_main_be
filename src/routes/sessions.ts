@@ -293,6 +293,7 @@ router.post(
  * Query params:
  * - limit: number of sessions to return (1-100, default 20)
  * - status: filter by status - 'completed', 'processing', 'failed', 'pending', 'transcribing', 'awaiting_review', 'analyzing', 'all' (default: 'completed')
+ * - sessionType: 'interview' | 'practice' | 'all' (default: 'all')
  */
 router.get('/history', 
   enforceDataIsolation('session'), 
@@ -302,6 +303,7 @@ router.get('/history',
     const userId = req.user!.id;
     const limit = parseInt(req.query.limit as string) || 20;
     const statusFilter = (req.query.status as string) || 'completed';
+    const sessionTypeRaw = (req.query.sessionType as string) || 'all';
 
     if (limit < 1 || limit > 100) {
       return res.status(400).json({
@@ -336,11 +338,31 @@ router.get('/history',
       });
     }
 
-    const sessions = await audioSessionService.getSessionHistory(userId, limit, statusFilter);
+    const validSessionTypes = ['interview', 'practice', 'all'];
+    if (!validSessionTypes.includes(sessionTypeRaw)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_SESSION_TYPE',
+          message: `sessionType must be one of: ${validSessionTypes.join(', ')}`
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    const sessionTypeFilter = sessionTypeRaw as 'interview' | 'practice' | 'all';
+
+    const sessions = await audioSessionService.getSessionHistory(
+      userId,
+      limit,
+      statusFilter,
+      sessionTypeFilter
+    );
 
     const formattedSessions = sessions.map(session => ({
       id: session.id,
       displayName: session.displayName ?? formatSessionDisplayName(session.createdAt),
+      sessionType: session.sessionType,
       status: session.status,
       scores: {
         overall: session.overallScore,
@@ -359,7 +381,7 @@ router.get('/history',
       data: {
         sessions: formattedSessions,
         total: sessions.length,
-        filter: statusFilter
+        filter: { status: statusFilter, sessionType: sessionTypeFilter }
       }
     });
     return;

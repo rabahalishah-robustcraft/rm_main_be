@@ -32,7 +32,7 @@ export const DEFAULT_COACHING_MODEL = 'gpt-5.3-chat-latest';
  * Some models only allow the default temperature (e.g. GPT-5.3 Chat: not 0.3).
  * Omit `temperature` in those cases so the API uses its default.
  */
-function modelSupportsCustomTemperature(model: string): boolean {
+export function modelSupportsCustomTemperature(model: string): boolean {
   const m = model.toLowerCase();
   if (m.startsWith('o') && /^o\d/i.test(model)) return false;
   if (m.startsWith('gpt-5')) return false;

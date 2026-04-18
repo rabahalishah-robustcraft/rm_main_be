@@ -272,7 +272,27 @@ export const validationSchemas = {
             'analyzing',
             'all'
           )
-          .optional()
+          .optional(),
+        sessionType: Joi.string().valid('interview', 'practice', 'all').optional()
+      })
+    }
+  },
+
+  // Practice endpoints
+  practice: {
+    updateAnswer: {
+      params: Joi.object({
+        id: Joi.string().pattern(/^c[a-z0-9]{24}$/).required().messages({
+          'string.pattern.base': 'Session ID must be a valid CUID',
+          'any.required': 'Session ID is required'
+        })
+      }),
+      body: Joi.object({
+        transcript: Joi.string().trim().min(10).max(50000).required().messages({
+          'string.min': 'Transcript must be at least 10 characters',
+          'string.max': 'Transcript is too long',
+          'any.required': 'transcript is required'
+        })
       })
     }
   },
