@@ -143,30 +143,44 @@ router.post('/:id/audio',
       });
     }
 
-    // Upload audio and start processing
-    await audioSessionService.uploadAudio(sessionId, audioFile.buffer, audioFile.originalname);
+    const uploadResult = await audioSessionService.uploadAudio(
+      sessionId,
+      audioFile.buffer,
+      audioFile.originalname,
+      audioFile.mimetype || 'audio/wav'
+    );
 
     res.status(200).json({
       success: true,
       message: 'Audio uploaded successfully. Processing started.',
       data: {
-        sessionId,
-        status: 'processing'
+        id: uploadResult.id,
+        status: uploadResult.status
       }
     });
     return;
   } catch (error) {
     if (error instanceof AudioSessionError) {
-      const statusCode = error.code === 'SESSION_NOT_FOUND' ? 404 : 
-                        error.code === 'INVALID_SESSION_STATE' ? 409 : 400;
-      return res.status(statusCode).json({
+      const statusCode =
+        error.code === 'SESSION_NOT_FOUND'
+          ? 404
+          : error.code === 'INVALID_SESSION_STATE'
+            ? 409
+            : error.code === 'ASSEMBLYAI_SUBMIT_FAILED'
+              ? 500
+              : 400;
+      const payload: Record<string, unknown> = {
         error: {
           code: error.code,
           message: error.message
         },
         timestamp: new Date().toISOString(),
         path: req.path
-      });
+      };
+      if (error.code === 'ASSEMBLYAI_SUBMIT_FAILED' && error.originalError?.message) {
+        (payload.error as Record<string, unknown>).upstream = error.originalError.message;
+      }
+      return res.status(statusCode).json(payload);
     }
 
     console.error('Audio upload error:', error);
@@ -183,13 +197,102 @@ router.post('/:id/audio',
 });
 
 /**
+ * Pull transcript from AssemblyAI (recover when webhook URL was wrong or callback failed).
+ * POST /api/sessions/:id/assembly-sync
+ */
+router.post(
+  '/:id/assembly-sync',
+  enforceDataIsolation('session'),
+  validateRequest(validationSchemas.sessions.sessionId),
+  aiProcessingRateLimit,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const userId = req.user!.id;
+
+      const session = await audioSessionService.syncTranscriptFromAssembly(sessionId, userId);
+
+      const hasAnalysis = session.status === 'completed' && session.aiAnalysis != null;
+
+      res.status(200).json({
+        success: true,
+        message:
+          session.status === 'awaiting_review'
+            ? 'Transcript synced from AssemblyAI'
+            : session.status === 'failed'
+              ? 'AssemblyAI reported an error for this job'
+              : 'Session updated',
+        data: {
+          id: session.id,
+          displayName: session.displayName ?? null,
+          status: session.status,
+          compactTranscript: session.compactTranscript,
+          editedTranscript: session.editedTranscript,
+          transcript: session.transcript,
+          aiAnalysis: session.aiAnalysis,
+          scores: hasAnalysis
+            ? {
+                overall: session.overallScore,
+                clarity: session.clarityScore,
+                confidence: session.confidenceScore,
+                specificity: session.specificityScore,
+                tone: session.toneScore,
+                enthusiasm: session.enthusiasmScore
+              }
+            : null,
+          analysisComplete: session.analysisComplete,
+          processingError: session.processingError,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt
+        }
+      });
+      return;
+    } catch (error) {
+      if (error instanceof AudioSessionError) {
+        const statusCode =
+          error.code === 'SESSION_NOT_FOUND'
+            ? 404
+            : error.code === 'SESSION_ACCESS_DENIED'
+              ? 403
+              : error.code === 'TRANSCRIPT_NOT_READY'
+                ? 409
+                : error.code === 'INVALID_SESSION_STATE' || error.code === 'ASSEMBLY_JOB_MISSING'
+                  ? 409
+                  : error.code === 'ASSEMBLYAI_NOT_CONFIGURED'
+                    ? 503
+                    : 400;
+        return res.status(statusCode).json({
+          error: {
+            code: error.code,
+            message: error.message
+          },
+          timestamp: new Date().toISOString(),
+          path: req.path
+        });
+      }
+
+      console.error('Assembly sync error:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to sync transcript from AssemblyAI'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+      return;
+    }
+  }
+);
+
+/**
  * Get user's session history
  * GET /api/sessions/history
  * Requirements: 5.3
  * 
  * Query params:
  * - limit: number of sessions to return (1-100, default 20)
- * - status: filter by status - 'completed', 'processing', 'failed', 'pending', 'all' (default: 'completed')
+ * - status: filter by status - 'completed', 'processing', 'failed', 'pending', 'transcribing', 'awaiting_review', 'analyzing', 'all' (default: 'completed')
  */
 router.get('/history', 
   enforceDataIsolation('session'), 
@@ -212,7 +315,16 @@ router.get('/history',
     }
 
     // Validate status filter
-    const validStatuses = ['completed', 'processing', 'failed', 'pending', 'all'];
+    const validStatuses = [
+      'completed',
+      'processing',
+      'failed',
+      'pending',
+      'transcribing',
+      'awaiting_review',
+      'analyzing',
+      'all'
+    ];
     if (!validStatuses.includes(statusFilter)) {
       return res.status(400).json({
         error: {
@@ -231,6 +343,7 @@ router.get('/history',
       displayName: session.displayName ?? formatSessionDisplayName(session.createdAt),
       status: session.status,
       scores: {
+        overall: session.overallScore,
         clarity: session.clarityScore,
         confidence: session.confidenceScore,
         tone: session.toneScore,
@@ -294,18 +407,18 @@ router.patch('/:id/transcript',
 
     res.status(200).json({
       success: true,
-      message: 'Transcript updated and analysis completed',
+      message: 'Analysis complete.',
       data: {
         id: session.id,
         status: session.status,
-        transcript: session.transcript,
         aiAnalysis: session.aiAnalysis,
         scores: {
+          overall: session.overallScore,
           clarity: session.clarityScore,
           confidence: session.confidenceScore,
+          specificity: session.specificityScore,
           tone: session.toneScore,
-          enthusiasm: session.enthusiasmScore,
-          specificity: session.specificityScore
+          enthusiasm: session.enthusiasmScore
         },
         updatedAt: session.updatedAt
       }
@@ -313,16 +426,26 @@ router.patch('/:id/transcript',
     return;
   } catch (error) {
     if (error instanceof AudioSessionError) {
-      const statusCode = error.code === 'SESSION_NOT_FOUND' ? 404 :
-                        error.code === 'SESSION_ACCESS_DENIED' ? 403 : 400;
-      return res.status(statusCode).json({
+      const statusCode =
+        error.code === 'SESSION_NOT_FOUND'
+          ? 404
+          : error.code === 'SESSION_ACCESS_DENIED'
+            ? 403
+            : error.code === 'ANALYSIS_FAILED'
+              ? 500
+              : 400;
+      const payload: Record<string, unknown> = {
         error: {
           code: error.code,
           message: error.message
         },
         timestamp: new Date().toISOString(),
         path: req.path
-      });
+      };
+      if (error.code === 'ANALYSIS_FAILED' && error.originalError?.message) {
+        (payload.error as Record<string, unknown>).upstream = error.originalError.message;
+      }
+      return res.status(statusCode).json(payload);
     }
     console.error('Transcript update error:', error);
     res.status(500).json({
@@ -430,21 +553,28 @@ router.get('/:id',
       });
     }
 
+    const hasAnalysis = session.status === 'completed' && session.aiAnalysis != null;
+
     res.status(200).json({
       success: true,
       data: {
         id: session.id,
         displayName: session.displayName ?? null,
         status: session.status,
+        compactTranscript: session.compactTranscript,
+        editedTranscript: session.editedTranscript,
         transcript: session.transcript,
         aiAnalysis: session.aiAnalysis,
-        scores: {
-          clarity: session.clarityScore,
-          confidence: session.confidenceScore,
-          tone: session.toneScore,
-          enthusiasm: session.enthusiasmScore,
-          specificity: session.specificityScore
-        },
+        scores: hasAnalysis
+          ? {
+              overall: session.overallScore,
+              clarity: session.clarityScore,
+              confidence: session.confidenceScore,
+              specificity: session.specificityScore,
+              tone: session.toneScore,
+              enthusiasm: session.enthusiasmScore
+            }
+          : null,
         analysisComplete: session.analysisComplete,
         processingError: session.processingError,
         createdAt: session.createdAt,

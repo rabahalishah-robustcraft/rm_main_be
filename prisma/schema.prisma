@@ -101,6 +101,12 @@ model AudioSession {
   specificityScore Int?
   status           String    @default("pending")
   processingError  String?   // Error message when status is failed (e.g. parse or API error)
+
+  assemblyJobId     String?   @unique
+  compactTranscript Json?
+  editedTranscript  Json?
+  overallScore      Int?
+
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

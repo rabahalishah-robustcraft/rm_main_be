@@ -178,7 +178,7 @@ describe('Complete System Integration Tests - Task 13.1', () => {
       // ProfileService should have S3, OpenAI, and Prisma dependencies
       expect(services.profileService).toBeDefined();
       
-      // AudioSessionService should have Prisma, OpenAI, S3, and Subscription dependencies
+      // AudioSessionService should have Prisma, S3, and Subscription dependencies
       expect(services.audioSessionService).toBeDefined();
       
       // All services should be instances of their respective classes

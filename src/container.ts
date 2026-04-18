@@ -114,12 +114,7 @@ class Container {
     const dashboardService = new DashboardService(prisma);
     const profileService = new ProfileService(s3Service, openaiService, prisma);
     const onboardingService = new OnboardingService(profileService, openaiService, s3Service, prisma);
-    const audioSessionService = new AudioSessionService(
-      prisma, 
-      openaiService, 
-      s3Service, 
-      subscriptionService
-    );
+    const audioSessionService = new AudioSessionService(prisma, s3Service, subscriptionService);
 
     console.log('✅ Core services initialized');
 

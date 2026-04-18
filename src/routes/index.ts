@@ -4,6 +4,7 @@ import { createAuthRoutes } from './auth';
 import { createProfileRoutes } from './profile';
 import { createOnboardingRoutes } from './onboarding';
 import { createSessionRoutes } from './sessions';
+import { createWebhookRoutes } from './webhooks';
 import { createSubscriptionRoutes } from './subscription';
 import { createDashboardRoutes } from './dashboard';
 import { createAdminRoutes } from './admin';
@@ -22,6 +23,9 @@ export function createApiRoutes(services: ServiceContainer): Router {
 
   // Mount session routes
   router.use('/sessions', createSessionRoutes(services));
+
+  // AssemblyAI webhooks (no JWT; secret header verification)
+  router.use('/webhooks', createWebhookRoutes(services));
 
   // Mount subscription routes
   router.use('/subscription', createSubscriptionRoutes(services));
@@ -87,10 +91,14 @@ export function createApiRoutes(services: ServiceContainer): Router {
         sessions: {
           'POST /api/sessions/start': 'Start a new audio session',
           'POST /api/sessions/:id/audio': 'Upload audio to session',
-          'PATCH /api/sessions/:id/transcript': 'Update transcript and resubmit for insights',
+          'POST /api/sessions/:id/assembly-sync': 'Pull transcript from AssemblyAI when webhook failed',
+          'PATCH /api/sessions/:id/transcript': 'Submit edited compact transcript array for coaching analysis',
           'PATCH /api/sessions/:id': 'Update session display name (event label)',
           'GET /api/sessions/:id': 'Get session details',
           'GET /api/sessions/history': 'Get session history'
+        },
+        webhooks: {
+          'POST /api/webhooks/assemblyai': 'AssemblyAI transcription completion callback (no JWT)'
         },
         subscription: {
           'GET /api/subscription/info': 'Get subscription and usage information',

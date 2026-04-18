@@ -1,26 +1,19 @@
 /**
- * Integration Test: End-to-End Audio Transcription and Analysis
- * 
- * This test verifies the complete audio transcription and analysis flow:
- * 1. Upload audio file to S3
- * 2. Verify Whisper transcription succeeds
- * 3. Verify GPT analysis returns scores and feedback
- * 4. Verify session is updated with results
- * 
- * Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4
+ * Integration tests: AssemblyAI submit + webhook-style transcript ready + coaching analysis.
  */
 
 import { AudioSessionService } from '../../src/services/AudioSessionService';
 import { S3Service } from '../../src/services/S3Service';
-import { OpenAIService } from '../../src/services/OpenAIService';
 import { SubscriptionService } from '../../src/services/SubscriptionService';
+import * as assemblyAIService from '../../src/services/assemblyAIService';
+import * as analysisService from '../../src/services/analysisService';
 import prisma from '../../src/lib/prisma';
 import { createVerifiedUserWithProfile } from './helpers/testUserFactory';
 
-// Mock the monitoring service to prevent background health checks
 jest.mock('../../src/services/MonitoringService', () => {
   const mockMonitoringService = {
     recordAPICall: jest.fn(),
+    recordAPIOperation: jest.fn(),
     recordError: jest.fn(),
     getMetrics: jest.fn().mockReturnValue({}),
     getHealthStatus: jest.fn().mockReturnValue({ status: 'healthy' }),
@@ -31,23 +24,40 @@ jest.mock('../../src/services/MonitoringService', () => {
     addAlert: jest.fn(),
     checkForAlerts: jest.fn()
   };
-  
+
   return {
     monitoringService: mockMonitoringService,
     MonitoringService: jest.fn().mockImplementation(() => mockMonitoringService)
   };
 });
 
-describe('Audio Transcription and Analysis Integration Tests', () => {
+function sampleCoachingReport() {
+  return {
+    overallScore: 73,
+    overallLabel: 'Good effort',
+    summary: 'Solid effort with room to grow.',
+    attributes: {
+      clarity: { score: 76, feedback: 'Clear structure.', coachTip: 'Use STAR.' },
+      confidence: { score: 62, feedback: 'Some hedging.', coachTip: 'Be direct.' },
+      specificity: { score: 58, feedback: 'Add metrics.', coachTip: 'Quantify wins.' },
+      tone: { score: 82, feedback: 'Professional.', coachTip: 'Keep it up.' },
+      enthusiasm: { score: 86, feedback: 'Strong energy.', coachTip: 'Lead with it.' }
+    },
+    insights: {
+      strengths: ['Consistent enthusiasm', 'Adaptive tone', 'Clear pacing'],
+      focusAreas: ['Add concrete metrics', 'Fewer filler words', 'Steadier delivery']
+    }
+  };
+}
+
+describe('Audio transcription and coaching flow', () => {
   let audioSessionService: AudioSessionService;
   let s3Service: S3Service;
-  let openaiService: OpenAIService;
   let subscriptionService: SubscriptionService;
   let testUserId: string;
   let testAudioBuffer: Buffer;
 
   beforeAll(async () => {
-    // Initialize services with test configuration
     const s3Config = {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test-key',
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test-secret',
@@ -55,23 +65,8 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
       bucketName: process.env.AWS_S3_BUCKET || 'test-bucket'
     };
     s3Service = new S3Service(s3Config);
-
-    const openaiConfig = {
-      gptApiKey: process.env.OPENAI_API_KEY || 'test-gpt-key',
-      whisperApiKey: process.env.WHISPER_API_KEY || 'test-whisper-key',
-      maxRetries: 3,
-      timeout: 60000
-    };
-    openaiService = new OpenAIService(openaiConfig);
-
     subscriptionService = new SubscriptionService(prisma);
-
-    audioSessionService = new AudioSessionService(
-      prisma,
-      openaiService,
-      s3Service,
-      subscriptionService
-    );
+    audioSessionService = new AudioSessionService(prisma, s3Service, subscriptionService);
 
     const testUser = await createVerifiedUserWithProfile('audio-test@example.com', 'Password123!');
     testUserId = testUser.id;
@@ -86,305 +81,213 @@ describe('Audio Transcription and Analysis Integration Tests', () => {
       }
     });
 
-    // Create test audio buffer (WAV format)
     testAudioBuffer = createTestAudioBuffer();
   });
 
+  beforeEach(async () => {
+    await prisma.usageTracking.deleteMany({ where: { userId: testUserId } });
+    const existing = await prisma.audioSession.findMany({ where: { userId: testUserId } });
+    for (const s of existing) {
+      if (s.audioS3Key) {
+        try {
+          await s3Service.deleteFile(s.audioS3Key);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    await prisma.audioSession.deleteMany({ where: { userId: testUserId } });
+
+    let jobSeq = 0;
+    jest.spyOn(assemblyAIService, 'submitTranscription').mockImplementation(async () => {
+      jobSeq += 1;
+      return `fake-assembly-job-id-${jobSeq}-${Date.now()}`;
+    });
+    jest.spyOn(analysisService, 'generateAIReport').mockResolvedValue(sampleCoachingReport() as never);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   afterAll(async () => {
-    // Clean up test data
     try {
-      // Get all sessions for the test user
       const sessions = await prisma.audioSession.findMany({
         where: { userId: testUserId }
       });
-
-      // Delete audio files from S3
       for (const session of sessions) {
         if (session.audioS3Key) {
           try {
             await s3Service.deleteFile(session.audioS3Key);
-          } catch (error) {
-            console.warn('Failed to delete test audio from S3:', error);
+          } catch {
+            // ignore
           }
         }
       }
-
-      // Delete sessions
-      await prisma.audioSession.deleteMany({
-        where: { userId: testUserId }
-      });
-
-      // Delete profile
-      await prisma.userProfile.deleteMany({
-        where: { userId: testUserId }
-      });
-
-      // Delete user
-      await prisma.user.deleteMany({
-        where: { email: 'audio-test@example.com' }
-      });
+      await prisma.audioSession.deleteMany({ where: { userId: testUserId } });
+      await prisma.userProfile.deleteMany({ where: { userId: testUserId } });
+      await prisma.user.deleteMany({ where: { email: 'audio-test@example.com' } });
     } catch (error) {
       console.error('Cleanup error:', error);
     }
-
     await prisma.$disconnect();
   });
 
-  describe('End-to-End Audio Transcription and Analysis', () => {
-    it('should successfully upload audio, transcribe, analyze, and update session', async () => {
-      // Step 1: Create a new session
-      const session = await audioSessionService.startSession(testUserId);
-      expect(session).toBeDefined();
-      expect(session.userId).toBe(testUserId);
-      expect(session.status).toBe('pending');
-
-      // Step 2: Upload audio file to S3
-      // Requirement 1.1: Upload audio file and store S3 key
-      await audioSessionService.uploadAudio(session.id, testAudioBuffer, 'test-audio.wav');
-
-      // Verify session was updated with S3 key
-      let updatedSession = await audioSessionService.getSession(session.id);
-      expect(updatedSession?.audioS3Key).toBeDefined();
-      expect(updatedSession?.audioS3Key).toContain('audio-sessions/');
-      expect(updatedSession?.audioS3Key).toContain(session.id);
-      expect(updatedSession?.status).toBe('processing');
-
-      // Verify file exists in S3
-      const fileExists = await s3Service.fileExists(updatedSession!.audioS3Key);
-      expect(fileExists).toBe(true);
-
-      // Step 3: Wait for async processing to complete
-      // The processAudio method is called asynchronously in uploadAudio
-      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
-
-      // Step 4: Verify Whisper transcription succeeded
-      // Requirement 1.2, 1.3: Whisper transcription returns text
-      updatedSession = await audioSessionService.getSession(session.id);
-      expect(updatedSession?.transcript).toBeDefined();
-      expect(updatedSession?.transcript).not.toBe('');
-      expect(typeof updatedSession?.transcript).toBe('string');
-
-      // Step 5: Verify GPT analysis returned scores and feedback
-      // Requirement 2.1, 2.2, 2.3, 2.4: GPT analysis returns scores and feedback
-      expect(updatedSession?.aiAnalysis).toBeDefined();
-      const aiAnalysis = updatedSession?.aiAnalysis as {
-        strengthAreas?: string[];
-        strengthInsights?: string[];
-        opportunityAreas?: string[];
-        opportunityInsights?: string[];
-        topTraits?: string[];
-      } | null;
-      expect(Array.isArray(aiAnalysis?.strengthAreas)).toBe(true);
-      expect(Array.isArray(aiAnalysis?.strengthInsights)).toBe(true);
-      expect(Array.isArray(aiAnalysis?.opportunityAreas)).toBe(true);
-      expect(Array.isArray(aiAnalysis?.opportunityInsights)).toBe(true);
-      expect(Array.isArray(aiAnalysis?.topTraits)).toBe(true);
-
-      // Verify scores are present and within valid range
-      expect(updatedSession?.clarityScore).toBeDefined();
-      expect(updatedSession?.confidenceScore).toBeDefined();
-      expect(updatedSession?.toneScore).toBeDefined();
-      expect(updatedSession?.enthusiasmScore).toBeDefined();
-      expect(updatedSession?.specificityScore).toBeDefined();
-
-      // Scores should be between 1 and 5 (out of 5)
-      expect(updatedSession?.clarityScore).toBeGreaterThanOrEqual(1);
-      expect(updatedSession?.clarityScore).toBeLessThanOrEqual(5);
-      expect(updatedSession?.confidenceScore).toBeGreaterThanOrEqual(1);
-      expect(updatedSession?.confidenceScore).toBeLessThanOrEqual(5);
-
-      // Step 6: Verify session is marked as completed
-      expect(updatedSession?.status).toBe('completed');
-      expect(updatedSession?.analysisComplete).toBe(true);
-
-      // Step 7: Verify user profile was updated with AI attributes
-      const profile = await prisma.userProfile.findUnique({
-        where: { userId: testUserId }
-      });
-      expect(profile?.aiAttributes).toBeDefined();
-    }, 60000); // 60 second timeout
-
-    it('should handle multiple sessions for the same user', async () => {
-      // Create first session
-      const session1 = await audioSessionService.startSession(testUserId);
-      await audioSessionService.uploadAudio(session1.id, testAudioBuffer, 'audio1.wav');
-
-      // Create second session
-      const session2 = await audioSessionService.startSession(testUserId);
-      await audioSessionService.uploadAudio(session2.id, testAudioBuffer, 'audio2.wav');
-
-      // Wait for processing
-      await new Promise(resolve => setTimeout(resolve, 10000));
-
-      // Verify both sessions completed
-      const updatedSession1 = await audioSessionService.getSession(session1.id);
-      const updatedSession2 = await audioSessionService.getSession(session2.id);
-
-      expect(updatedSession1?.status).toBe('completed');
-      expect(updatedSession2?.status).toBe('completed');
-
-      // Verify sessions have different S3 keys
-      expect(updatedSession1?.audioS3Key).not.toBe(updatedSession2?.audioS3Key);
-
-      // Verify session history
-      const history = await audioSessionService.getSessionHistory(testUserId);
-      expect(history.length).toBeGreaterThanOrEqual(2);
-    }, 60000);
-
-    it('should include user context in GPT analysis', async () => {
-      // Create session
-      const session = await audioSessionService.startSession(testUserId);
-      await audioSessionService.uploadAudio(session.id, testAudioBuffer, 'context-test.wav');
-
-      // Wait for processing
-      await new Promise(resolve => setTimeout(resolve, 10000));
-
-      // Verify analysis was performed with user context
-      const updatedSession = await audioSessionService.getSession(session.id);
-      expect(updatedSession?.aiAnalysis).toBeDefined();
-
-      // The analysis should have been performed with the user's target role
-      // This is verified indirectly by checking that analysis completed successfully
-      expect(updatedSession?.status).toBe('completed');
-    }, 60000);
-
-    it('should handle session not found error', async () => {
-      const nonExistentSessionId = '00000000-0000-0000-0000-000000000000';
-
-      const session = await audioSessionService.getSession(nonExistentSessionId);
-      expect(session).toBeNull();
+  async function simulateAssemblyWebhookComplete(sessionId: string): Promise<void> {
+    const row = await prisma.audioSession.findUnique({ where: { id: sessionId } });
+    const jobId = row?.assemblyJobId || `sim-${sessionId}`;
+    await prisma.audioSession.update({
+      where: { id: sessionId },
+      data: {
+        status: 'awaiting_review',
+        assemblyJobId: jobId,
+        transcript: 'Speaker A: Hello\nSpeaker B: Hi',
+        compactTranscript: [
+          { id: 0, s: 'A', t: 'Hello', start: 0, end: 400 },
+          { id: 1, s: 'B', t: 'Hi', start: 400, end: 800 }
+        ] as object[]
+      }
     });
+  }
 
-    it('should handle invalid session state for audio upload', async () => {
-      // Create and process a session
-      const session = await audioSessionService.startSession(testUserId);
-      await audioSessionService.uploadAudio(session.id, testAudioBuffer, 'first-upload.wav');
+  it('uploads audio, transcribing state, then coaching completes after review', async () => {
+    const session = await audioSessionService.startSession(testUserId);
+    expect(session.status).toBe('pending');
 
-      // Try to upload audio again to the same session
-      await expect(
-        audioSessionService.uploadAudio(session.id, testAudioBuffer, 'second-upload.wav')
-      ).rejects.toThrow('Session is not in pending state');
-    });
+    const uploadResult = await audioSessionService.uploadAudio(
+      session.id,
+      testAudioBuffer,
+      'test-audio.wav',
+      'audio/wav'
+    );
+    expect(uploadResult.status).toBe('transcribing');
+    expect(assemblyAIService.submitTranscription).toHaveBeenCalled();
 
-    it('should retrieve session history with correct ordering', async () => {
-      // Create multiple sessions
-      const session1 = await audioSessionService.startSession(testUserId);
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      const session2 = await audioSessionService.startSession(testUserId);
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      const session3 = await audioSessionService.startSession(testUserId);
+    let row = await prisma.audioSession.findUnique({ where: { id: session.id } });
+    expect(row?.audioS3Key).toContain('audio-sessions/');
+    const fileExists = await s3Service.fileExists(row!.audioS3Key);
+    expect(fileExists).toBe(true);
 
-      // Get history
-      const history = await audioSessionService.getSessionHistory(testUserId, 10);
+    await simulateAssemblyWebhookComplete(session.id);
 
-      // Verify sessions are ordered by creation date (newest first)
-      expect(history.length).toBeGreaterThanOrEqual(3);
-      expect(history[0].id).toBe(session3.id);
-      expect(history[1].id).toBe(session2.id);
-      expect(history[2].id).toBe(session1.id);
-    });
+    const turns = [
+      { id: 0, s: 'A', t: 'Hello', start: 0, end: 400 },
+      { id: 1, s: 'B', t: 'Hi', start: 400, end: 800 }
+    ];
+    const updated = await audioSessionService.updateTranscriptAndReanalyze(session.id, testUserId, turns);
 
-    it('should limit session history results', async () => {
-      // Get history with limit
-      const history = await audioSessionService.getSessionHistory(testUserId, 2);
+    expect(updated.status).toBe('completed');
+    expect(updated.aiAnalysis).toBeDefined();
+    const analysis = updated.aiAnalysis as { overallScore?: number; insights?: { strengths: string[] } };
+    expect(analysis.overallScore).toBe(73);
+    expect(Array.isArray(analysis.insights?.strengths)).toBe(true);
+    expect(updated.clarityScore).toBe(76);
+    expect(updated.overallScore).toBe(73);
+  }, 60000);
 
-      // Verify limit is respected
-      expect(history.length).toBeLessThanOrEqual(2);
-    });
+  it('handles multiple sessions', async () => {
+    const session1 = await audioSessionService.startSession(testUserId);
+    const session2 = await audioSessionService.startSession(testUserId);
+
+    await audioSessionService.uploadAudio(session1.id, testAudioBuffer, 'a1.wav', 'audio/wav');
+    await audioSessionService.uploadAudio(session2.id, testAudioBuffer, 'a2.wav', 'audio/wav');
+
+    await simulateAssemblyWebhookComplete(session1.id);
+    await simulateAssemblyWebhookComplete(session2.id);
+
+    const turns = [{ id: 0, s: 'A', t: 'Hi', start: 0, end: 100 }];
+    await audioSessionService.updateTranscriptAndReanalyze(session1.id, testUserId, turns);
+    await audioSessionService.updateTranscriptAndReanalyze(session2.id, testUserId, turns);
+
+    const s1 = await audioSessionService.getSession(session1.id);
+    const s2 = await audioSessionService.getSession(session2.id);
+    expect(s1?.status).toBe('completed');
+    expect(s2?.status).toBe('completed');
+    expect(s1?.audioS3Key).not.toBe(s2?.audioS3Key);
+  }, 60000);
+
+  it('rejects second upload when not pending', async () => {
+    const session = await audioSessionService.startSession(testUserId);
+    await audioSessionService.uploadAudio(session.id, testAudioBuffer, 'once.wav', 'audio/wav');
+    await expect(
+      audioSessionService.uploadAudio(session.id, testAudioBuffer, 'twice.wav', 'audio/wav')
+    ).rejects.toMatchObject({ code: 'INVALID_SESSION_STATE' });
   });
 
-  describe('Audio Processing Error Handling', () => {
-    it('should handle transcription failures gracefully', async () => {
-      // Create a service with a mock OpenAI service that fails transcription
-      const failingOpenAIService = {
-        transcribeAudio: jest.fn().mockRejectedValue(new Error('Whisper API failed')),
-        analyzeResponse: jest.fn()
-      } as any;
+  it('marks session failed when AssemblyAI submit throws', async () => {
+    jest.spyOn(assemblyAIService, 'submitTranscription').mockRejectedValue(new Error('network down'));
 
-      const testAudioService = new AudioSessionService(
-        prisma,
-        failingOpenAIService,
-        s3Service,
-        subscriptionService
-      );
+    const testUser2 = await createVerifiedUserWithProfile('audio-test2@example.com', 'Password123!');
+    try {
+      const session = await audioSessionService.startSession(testUser2.id);
+      await expect(
+        audioSessionService.uploadAudio(session.id, testAudioBuffer, 'fail.wav', 'audio/wav')
+      ).rejects.toMatchObject({ code: 'ASSEMBLYAI_SUBMIT_FAILED' });
 
-      // Create another test user for this test
-      const testUser2 = await createVerifiedUserWithProfile('audio-test2@example.com', 'Password123!');
-      const testUserId2 = testUser2.id;
+      const failed = await prisma.audioSession.findUnique({ where: { id: session.id } });
+      expect(failed?.status).toBe('failed');
+      expect(failed?.processingError).toContain('AssemblyAI submission failed');
+    } finally {
+      await prisma.usageTracking.deleteMany({ where: { userId: testUser2.id } });
+      await prisma.audioSession.deleteMany({ where: { userId: testUser2.id } });
+      await prisma.userProfile.deleteMany({ where: { userId: testUser2.id } });
+      await prisma.user.deleteMany({ where: { email: 'audio-test2@example.com' } });
+    }
+  });
 
-      try {
-        // Create session and upload audio
-        const session = await testAudioService.startSession(testUserId2);
-        await testAudioService.uploadAudio(session.id, testAudioBuffer, 'fail-test.wav');
+  it('returns null for unknown session id', async () => {
+    const session = await audioSessionService.getSession('c0000000000000000000000000');
+    expect(session).toBeNull();
+  });
 
-        // Wait for processing
-        await new Promise(resolve => setTimeout(resolve, 5000));
+  it('orders session history newest first', async () => {
+    const session1 = await audioSessionService.startSession(testUserId);
+    await new Promise((r) => setTimeout(r, 50));
+    const session2 = await audioSessionService.startSession(testUserId);
+    await new Promise((r) => setTimeout(r, 50));
+    const session3 = await audioSessionService.startSession(testUserId);
 
-        // Verify session is marked as failed
-        const updatedSession = await testAudioService.getSession(session.id);
-        expect(updatedSession?.status).toBe('failed');
+    const history = await audioSessionService.getSessionHistory(testUserId, 10, 'all');
+    const ids = history.map((h) => h.id);
+    expect(ids.indexOf(session3.id)).toBeLessThan(ids.indexOf(session2.id));
+    expect(ids.indexOf(session2.id)).toBeLessThan(ids.indexOf(session1.id));
+  });
 
-        // Clean up
-        await prisma.audioSession.deleteMany({ where: { userId: testUserId2 } });
-        await prisma.userProfile.deleteMany({ where: { userId: testUserId2 } });
-        await prisma.user.deleteMany({ where: { email: 'audio-test2@example.com' } });
-      } catch (error) {
-        // Clean up on error
-        await prisma.audioSession.deleteMany({ where: { userId: testUserId2 } });
-        await prisma.userProfile.deleteMany({ where: { userId: testUserId2 } });
-        await prisma.user.deleteMany({ where: { email: 'audio-test2@example.com' } });
-        throw error;
-      }
-    }, 30000);
+  it('respects history limit', async () => {
+    const history = await audioSessionService.getSessionHistory(testUserId, 2, 'all');
+    expect(history.length).toBeLessThanOrEqual(2);
   });
 });
 
-/**
- * Helper function to create a test audio buffer
- * Creates a minimal valid WAV file that can be processed by Whisper
- */
 function createTestAudioBuffer(): Buffer {
-  // Create a minimal valid WAV file
-  // WAV format: RIFF header + fmt chunk + data chunk
-  
-  const sampleRate = 16000; // 16kHz sample rate (good for speech)
-  const numChannels = 1; // Mono
+  const sampleRate = 16000;
+  const numChannels = 1;
   const bitsPerSample = 16;
-  const duration = 2; // 2 seconds
+  const duration = 2;
   const numSamples = sampleRate * duration;
   const dataSize = numSamples * numChannels * (bitsPerSample / 8);
-  
-  // Create buffer for WAV file
   const buffer = Buffer.alloc(44 + dataSize);
-  
-  // RIFF header
+
   buffer.write('RIFF', 0);
   buffer.writeUInt32LE(36 + dataSize, 4);
   buffer.write('WAVE', 8);
-  
-  // fmt chunk
   buffer.write('fmt ', 12);
-  buffer.writeUInt32LE(16, 16); // fmt chunk size
-  buffer.writeUInt16LE(1, 20); // audio format (1 = PCM)
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
   buffer.writeUInt16LE(numChannels, 22);
   buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 28); // byte rate
-  buffer.writeUInt16LE(numChannels * (bitsPerSample / 8), 32); // block align
+  buffer.writeUInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 28);
+  buffer.writeUInt16LE(numChannels * (bitsPerSample / 8), 32);
   buffer.writeUInt16LE(bitsPerSample, 34);
-  
-  // data chunk
   buffer.write('data', 36);
   buffer.writeUInt32LE(dataSize, 40);
-  
-  // Generate simple audio data (sine wave at 440 Hz - A note)
+
   const frequency = 440;
   for (let i = 0; i < numSamples; i++) {
-    const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate);
-    const value = Math.round(sample * 32767 * 0.5); // 50% volume
+    const sample = Math.sin((2 * Math.PI * frequency * i) / sampleRate);
+    const value = Math.round(sample * 32767 * 0.5);
     buffer.writeInt16LE(value, 44 + i * 2);
   }
-  
+
   return buffer;
 }

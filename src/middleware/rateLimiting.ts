@@ -159,6 +159,18 @@ export const apiRateLimit = createRateLimit({
 });
 
 /**
+ * Same as apiRateLimit but skips AssemblyAI webhook deliveries (verified via secret header).
+ */
+export const apiRateLimitExcludingWebhooks = (req: Request, res: Response, next: NextFunction): void => {
+  const url = req.originalUrl || req.url || '';
+  if (url.includes('/webhooks')) {
+    next();
+    return;
+  }
+  apiRateLimit(req, res, next);
+};
+
+/**
  * Strict rate limiting for file uploads
  */
 export const uploadRateLimit = createRateLimit({
@@ -327,11 +339,27 @@ function collectInspectableStrings(query: Request['query'], body: unknown): stri
 }
 
 /**
+ * Routes that carry long user-authored prose (e.g. interview dialogue). SQL/XSS-style
+ * heuristics match normal English ("select a vendor", "create a dashboard", backticks
+ * in tech talk), so we skip inspection here; input is still validated by route Joi.
+ */
+function shouldSkipAbuseDetection(req: Request): boolean {
+  if (req.method?.toUpperCase() !== 'PATCH') return false;
+  const p = req.path || '';
+  return /^\/api\/sessions\/[^/]+\/transcript\/?$/.test(p);
+}
+
+/**
  * Abuse detection middleware
  * Inspects string values only (not JSON serialization) to avoid false positives on
  * normal JSON braces and to work correctly when the body is empty.
  */
 export const abuseDetection = (req: Request, res: Response, next: NextFunction): void => {
+  if (shouldSkipAbuseDetection(req)) {
+    next();
+    return;
+  }
+
   const clientId = getClientIdentifier(req);
   const strings = collectInspectableStrings(req.query, req.body);
   const requestData = strings.join('\u0000');

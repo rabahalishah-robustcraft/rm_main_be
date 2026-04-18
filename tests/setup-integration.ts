@@ -1,6 +1,10 @@
 // Integration test setup with real database
 import { PrismaClient } from '@prisma/client';
 
+// Session pipeline integration tests mock AssemblyAI but still read config at import time.
+process.env.ASSEMBLYAI_API_KEY ||= 'integration-test-assemblyai-api-key-placeholder';
+process.env.WEBHOOK_BASE_URL ||= 'https://example.com';
+
 // Integration tests use a real PostgreSQL database.
 // DATABASE_URL_TEST should point to a Postgres test database (see .env.test).
 const prisma = new PrismaClient({

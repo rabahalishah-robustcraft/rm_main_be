@@ -26,6 +26,14 @@ const configSchema = Joi.object({
   OPENAI_MODEL: Joi.string().default('gpt-3.5-turbo'),
   OPENAI_MAX_TOKENS: Joi.number().integer().min(1).default(1000),
   OPENAI_TEMPERATURE: Joi.number().min(0).max(2).default(0.7),
+
+  // AssemblyAI + coaching webhooks (optional; required when using session audio pipeline)
+  ASSEMBLYAI_API_KEY: Joi.string().optional().allow(''),
+  ASSEMBLYAI_WEBHOOK_SECRET: Joi.string().optional().allow(''),
+  WEBHOOK_BASE_URL: Joi.string().optional().allow(''),
+  COACHING_MODEL: Joi.string().optional().allow(''),
+  /** Comma-separated AssemblyAI speech models, e.g. "universal-3-pro" or "universal-2,universal-3-pro" */
+  ASSEMBLYAI_SPEECH_MODELS: Joi.string().optional().allow(''),
   
   // AWS Configuration
   AWS_ACCESS_KEY_ID: Joi.string().required(),
@@ -46,8 +54,10 @@ const configSchema = Joi.object({
   AUTH_RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(900000), // 15 minutes
   AUTH_RATE_LIMIT_MAX_ATTEMPTS: Joi.number().integer().min(1).default(10), // Increased from 5 to 10 attempts per window
   
-  // File Upload Configuration
-  MAX_FILE_SIZE: Joi.number().integer().min(1).default(50 * 1024 * 1024), // 50MB
+  // File Upload Configuration (session audio multipart, express json/urlencoded cap)
+  MAX_FILE_SIZE: Joi.number().integer().min(1).default(200 * 1024 * 1024), // 200MB — long high-quality interviews
+  /** Express request timeout for POST .../sessions/:id/audio (ms). Large files + S3 + AssemblyAI submit. */
+  AUDIO_UPLOAD_REQUEST_TIMEOUT_MS: Joi.number().integer().min(60000).max(3600000).default(20 * 60 * 1000),
   ALLOWED_FILE_TYPES: Joi.string().default('pdf,doc,docx,mp3,wav,m4a'),
   
   // Subscription Configuration
@@ -100,6 +110,12 @@ export interface Config {
   OPENAI_MODEL: string;
   OPENAI_MAX_TOKENS: number;
   OPENAI_TEMPERATURE: number;
+
+  ASSEMBLYAI_API_KEY?: string;
+  ASSEMBLYAI_WEBHOOK_SECRET?: string;
+  WEBHOOK_BASE_URL?: string;
+  COACHING_MODEL?: string;
+  ASSEMBLYAI_SPEECH_MODELS?: string;
   
   // AWS Configuration
   AWS_ACCESS_KEY_ID: string;
@@ -122,6 +138,7 @@ export interface Config {
   
   // File Upload Configuration
   MAX_FILE_SIZE: number;
+  AUDIO_UPLOAD_REQUEST_TIMEOUT_MS: number;
   ALLOWED_FILE_TYPES: string;
   
   // Subscription Configuration
@@ -152,6 +169,16 @@ export interface Config {
   ENABLE_ADMIN_ENDPOINTS: boolean;
 }
 
+/** Trim and strip accidental wrapping quotes from .env values (common copy/paste issue). */
+function normalizeEnvString(s: string | undefined): string | undefined {
+  if (s == null || s === '') return undefined;
+  let t = String(s).trim();
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+    t = t.slice(1, -1).trim();
+  }
+  return t === '' ? undefined : t;
+}
+
 /**
  * Validate and load configuration
  */
@@ -169,7 +196,15 @@ function loadConfig(): Config {
     throw new Error(`Configuration validation failed:\n${errorMessages}`);
   }
 
-  return value as Config;
+  const v = value as Config;
+  return {
+    ...v,
+    ASSEMBLYAI_API_KEY: normalizeEnvString(v.ASSEMBLYAI_API_KEY),
+    ASSEMBLYAI_WEBHOOK_SECRET: normalizeEnvString(v.ASSEMBLYAI_WEBHOOK_SECRET),
+    WEBHOOK_BASE_URL: normalizeEnvString(v.WEBHOOK_BASE_URL),
+    COACHING_MODEL: normalizeEnvString(v.COACHING_MODEL),
+    ASSEMBLYAI_SPEECH_MODELS: normalizeEnvString(v.ASSEMBLYAI_SPEECH_MODELS)
+  };
 }
 
 /**
@@ -325,9 +360,9 @@ export function checkConfigHealth(): { healthy: boolean; issues: string[] } {
     issues.push('No admin access configured (ADMIN_EMAILS or ADMIN_DOMAINS)');
   }
 
-  // Check file size limits
-  if (config.MAX_FILE_SIZE > 100 * 1024 * 1024) { // 100MB
-    issues.push('MAX_FILE_SIZE is very large, consider reducing for security');
+  // Check file size limits (advisory only)
+  if (config.MAX_FILE_SIZE > 512 * 1024 * 1024) {
+    issues.push('MAX_FILE_SIZE exceeds 512MB — confirm reverse proxy and memory limits');
   }
 
   return {

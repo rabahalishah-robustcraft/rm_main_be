@@ -1,3 +1,4 @@
+import './types/express-augment';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -18,11 +19,11 @@ import {
   performanceMonitor, 
   securityHeaders, 
   sanitizeRequest,
-  requestTimeout,
+  requestTimeoutWithLongAiRoutes,
   healthCheck 
 } from './middleware/logging';
 import { 
-  apiRateLimit, 
+  apiRateLimitExcludingWebhooks, 
   abuseDetection 
 } from './middleware/rateLimiting';
 import { 
@@ -90,8 +91,10 @@ async function createApp() {
     app.use(performanceMonitor);
   }
 
-  // Request timeout
-  app.use(requestTimeout(30000)); // 30 second timeout
+  // Request timeout: default 30s; PATCH .../transcript 2m; POST .../audio uses AUDIO_UPLOAD_REQUEST_TIMEOUT_MS
+  app.use(
+    requestTimeoutWithLongAiRoutes(30000, 120000, config.AUDIO_UPLOAD_REQUEST_TIMEOUT_MS)
+  );
 
   // Request validation and sanitization
   app.use(validateRequest);
@@ -100,10 +103,31 @@ async function createApp() {
   // API key validation (optional)
   app.use(validateApiKey);
 
-  // Rate limiting (if enabled)
+  // Rate limiting (if enabled) — skip /api/webhooks (AssemblyAI server callbacks)
   if (config.ENABLE_RATE_LIMITING) {
-    app.use('/api', apiRateLimit);
+    app.use('/api', apiRateLimitExcludingWebhooks);
   }
+
+  // Raw JSON body for AssemblyAI webhook HMAC / signature flows (must run before express.json)
+  app.use(
+    '/api/webhooks/assemblyai',
+    express.raw({ type: 'application/json', limit: '2mb' }),
+    (req, res, next) => {
+      const buf = req.body as Buffer;
+      if (Buffer.isBuffer(buf)) {
+        req.rawBody = buf;
+        try {
+          req.body = buf.length ? JSON.parse(buf.toString('utf8')) : {};
+        } catch {
+          req.body = {};
+        }
+      } else {
+        req.rawBody = Buffer.alloc(0);
+        req.body = req.body ?? {};
+      }
+      next();
+    }
+  );
 
   // Body parsing middleware (must run before abuse detection so body/query strings are inspectable)
   app.use(express.json({
@@ -183,9 +207,12 @@ async function startServer() {
     process.exit(1);
   });
 
-  // Start server
-  app.listen(PORT, () => {
-    console.log(`✅ Server running on port ${PORT}`);
+  // Bind all interfaces so tools like ngrok (forwarding to localhost:PORT) can reach the process.
+  // If you see ngrok ERR_NGROK_8012 / 502, confirm this PORT matches `ngrok http <PORT>` and the app is running.
+  const LISTEN_HOST = process.env.LISTEN_HOST || '0.0.0.0';
+
+  app.listen(PORT, LISTEN_HOST, () => {
+    console.log(`✅ Server listening on http://${LISTEN_HOST}:${PORT}`);
     console.log(`🌍 Environment: ${config.NODE_ENV}`);
     console.log(`📊 Monitoring: Active`);
     console.log(`🔒 Security: Enhanced`);

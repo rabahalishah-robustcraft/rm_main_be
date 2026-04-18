@@ -228,10 +228,22 @@ export const validationSchemas = {
         })
       }),
       body: Joi.object({
-        transcript: Joi.string().min(1).max(50000).trim().required().messages({
-          'string.min': 'Transcript cannot be empty',
-          'any.required': 'Transcript is required'
-        })
+        transcript: Joi.array()
+          .items(
+            Joi.object({
+              id: Joi.number().integer().min(0).required(),
+              s: Joi.string().max(16).required(),
+              t: Joi.string().max(50000).allow('').required(),
+              start: Joi.number().required(),
+              end: Joi.number().required()
+            })
+          )
+          .min(1)
+          .required()
+          .messages({
+            'array.min': 'Transcript must contain at least one turn',
+            'any.required': 'Transcript is required'
+          })
       })
     },
     updateDisplayName: {
@@ -249,7 +261,18 @@ export const validationSchemas = {
       query: Joi.object({
         limit: Joi.number().integer().min(1).max(100).optional(),
         offset: Joi.number().integer().min(0).optional(),
-        status: Joi.string().valid('completed', 'processing', 'failed', 'pending', 'all').optional()
+        status: Joi.string()
+          .valid(
+            'completed',
+            'processing',
+            'failed',
+            'pending',
+            'transcribing',
+            'awaiting_review',
+            'analyzing',
+            'all'
+          )
+          .optional()
       })
     }
   },
