@@ -3,7 +3,7 @@ import multer from 'multer';
 import { ServiceContainer } from '../container';
 import { authenticate, requireEmailVerified, AuthenticatedRequest } from '../middleware/auth';
 import { enforceDataIsolation } from '../middleware/security';
-import { aiProcessingRateLimit, uploadRateLimit } from '../middleware/rateLimiting';
+import { aiProcessingRateLimit } from '../middleware/rateLimiting';
 import { validateRequest, validationSchemas } from '../middleware/validation';
 import { AudioSessionError } from '../services/AudioSessionService';
 import { config } from '../utils/config';
@@ -100,7 +100,6 @@ router.post('/start', aiProcessingRateLimit, async (req: AuthenticatedRequest, r
 router.post('/:id/audio', 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.sessionId),
-  uploadRateLimit, 
   upload.single('audio'), 
   async (req: AuthenticatedRequest, res: Response) => {
   try {

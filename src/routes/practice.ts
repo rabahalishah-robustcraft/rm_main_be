@@ -78,7 +78,7 @@ export function createPracticeRoutes(services: ServiceContainer): Router {
       const userId = req.user!.id;
       const forceRefresh = req.query.refresh === 'true';
       const userProfile = await prisma.userProfile.findUnique({ where: { userId } });
-      const questions = await questionService.getOrGenerateQuestions(
+      const sections = await questionService.getOrGenerateQuestionSections(
         userId,
         userProfile,
         forceRefresh
@@ -86,7 +86,18 @@ export function createPracticeRoutes(services: ServiceContainer): Router {
       res.status(200).json({
         success: true,
         data: {
-          questions: questions.map((text, index) => ({ index, text })),
+          sections: [
+            {
+              key: 'domain',
+              title: 'Domain questions',
+              questions: sections.domain.map((text, index) => ({ index, text }))
+            },
+            {
+              key: 'behavioral',
+              title: 'Behavioral questions',
+              questions: sections.behavioral.map((text, index) => ({ index, text }))
+            }
+          ],
           personalized: !!(userProfile?.targetIndustry || userProfile?.targetJobTitle)
         }
       });
