@@ -1,5 +1,6 @@
 import { PrismaClient, UserProfile } from '@prisma/client';
 import OpenAI from 'openai';
+import { buildAiRecommendedQuestionPrompt } from '../prompts/aiRecommendedQuestionPrompt';
 import { buildQuestionPrompt } from '../prompts/questionPrompt';
 import {
   BEHAVIORAL_QUESTION_POOL,
@@ -17,6 +18,7 @@ const QUESTION_TTL_HOURS = 24;
 const SECTION_QUESTION_COUNT = 3;
 
 export type PracticeQuestionSections = {
+  aiRecommended: string[];
   domain: string[];
   behavioral: string[];
 };
@@ -29,9 +31,12 @@ function isNonEmptyStringArray3(value: unknown): value is string[] {
   );
 }
 
-function parseCachedQuestions(
-  cachedJson: unknown
-): { domain?: string[]; behavioral?: string[] } | null {
+/** Exported for unit tests (cache JSON shapes). */
+export function parseCachedQuestions(cachedJson: unknown): {
+  aiRecommended?: string[];
+  domain?: string[];
+  behavioral?: string[];
+} | null {
   if (isNonEmptyStringArray3(cachedJson)) {
     // Backward compatibility: old format stored `string[3]` only (domain-like set).
     return { domain: cachedJson };
@@ -39,15 +44,52 @@ function parseCachedQuestions(
 
   if (cachedJson && typeof cachedJson === 'object') {
     const obj = cachedJson as Record<string, unknown>;
+    const aiRecommended = obj.aiRecommended;
     const domain = obj.domain;
     const behavioral = obj.behavioral;
-    const parsed: { domain?: string[]; behavioral?: string[] } = {};
+    const parsed: {
+      aiRecommended?: string[];
+      domain?: string[];
+      behavioral?: string[];
+    } = {};
+    if (isNonEmptyStringArray3(aiRecommended)) parsed.aiRecommended = aiRecommended;
     if (isNonEmptyStringArray3(domain)) parsed.domain = domain;
     if (isNonEmptyStringArray3(behavioral)) parsed.behavioral = behavioral;
-    return parsed.domain || parsed.behavioral ? parsed : null;
+    return parsed.aiRecommended || parsed.domain || parsed.behavioral ? parsed : null;
   }
 
   return null;
+}
+
+function parseQuestionsJsonContent(raw: string | null): string[] {
+  if (!raw) {
+    throw new Error('Question generation returned empty content');
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('Question generation returned invalid JSON');
+  }
+
+  const obj = parsed as { questions?: unknown };
+  if (!Array.isArray(obj.questions) || obj.questions.length !== SECTION_QUESTION_COUNT) {
+    throw new Error('Question generation returned wrong format');
+  }
+  if (!obj.questions.every((t) => typeof t === 'string' && t.trim().length > 0)) {
+    throw new Error('Question generation returned invalid question strings');
+  }
+
+  return obj.questions as string[];
+}
+
+/** Remove model-added labels like "Behavioral (accessible):" from technical/domain questions. */
+export function stripLeadingCategoryPrefixFromTechnicalQuestion(text: string): string {
+  const re =
+    /^(?:Behavioral|Situational|Role-specific|Technical)\s*\([^)]*\)\s*:\s*/i;
+  const stripped = text.replace(re, '').trim();
+  return stripped.length > 0 ? stripped : text.trim();
 }
 
 export class QuestionService {
@@ -72,7 +114,8 @@ export class QuestionService {
 
   /**
    * Returns cached question sections when fresh; otherwise generates and persists a new set.
-   * - domain: generated from profile/target role + industry
+   * - aiRecommended: OpenAI, curated practice themes (distinct from technical set)
+   * - domain: generated from profile/target role + industry (technical)
    * - behavioral: sampled from a static pool
    */
   async getOrGenerateQuestionSections(
@@ -99,25 +142,19 @@ export class QuestionService {
 
     if (cached && cacheIsFresh && !forceRefresh) {
       const parsed = parseCachedQuestions(cached.questions as unknown);
-      if (parsed?.domain && parsed?.behavioral) {
-        return { domain: parsed.domain, behavioral: parsed.behavioral };
-      }
-      // If old format (domain only) or behavioral missing/corrupt, fill behavioral and persist
-      if (parsed?.domain) {
-        const behavioral = pickUniqueRandom(BEHAVIORAL_QUESTION_POOL, SECTION_QUESTION_COUNT);
-        await this.prisma.practiceQuestion.update({
-          where: { id: cached.id },
-          data: { questions: { domain: parsed.domain, behavioral } }
-        });
-        return { domain: parsed.domain, behavioral };
+      if (parsed?.aiRecommended && parsed?.domain && parsed?.behavioral) {
+        return {
+          aiRecommended: parsed.aiRecommended,
+          domain: parsed.domain.map(stripLeadingCategoryPrefixFromTechnicalQuestion),
+          behavioral: parsed.behavioral
+        };
       }
     }
 
-    const [domain, behavioral] = await Promise.all([
+    const [aiRecommended, domain, behavioral] = await Promise.all([
+      this.generateAiRecommendedQuestions(profile),
       this.generateDomainQuestions(profile),
-      Promise.resolve(
-        pickUniqueRandom(BEHAVIORAL_QUESTION_POOL, SECTION_QUESTION_COUNT)
-      )
+      Promise.resolve(pickUniqueRandom(BEHAVIORAL_QUESTION_POOL, SECTION_QUESTION_COUNT))
     ]);
 
     if (cached) {
@@ -127,30 +164,30 @@ export class QuestionService {
     await this.prisma.practiceQuestion.create({
       data: {
         userId,
-        questions: { domain, behavioral },
+        questions: { aiRecommended, domain, behavioral },
         industry: profile?.targetIndustry ?? null,
         jobTitle: profile?.targetJobTitle ?? null
       }
     });
 
-    return { domain, behavioral };
+    return { aiRecommended, domain, behavioral };
   }
 
-  private async generateDomainQuestions(profile: UserProfile | null): Promise<string[]> {
+  private async generateQuestionsViaOpenAI(
+    profile: UserProfile | null,
+    systemPrompt: string,
+    userMessage: string
+  ): Promise<string[]> {
     const model = (config.COACHING_MODEL || DEFAULT_COACHING_MODEL).trim();
     if (!model) {
       throw new Error('No coaching model configured (set COACHING_MODEL)');
     }
 
-    const systemPrompt = buildQuestionPrompt(profile);
     const response = await openai.chat.completions.create({
       model,
       messages: [
         { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: `Generate the ${SECTION_QUESTION_COUNT} domain-oriented practice interview questions now.`
-        }
+        { role: 'user', content: userMessage }
       ],
       ...(modelSupportsCustomTemperature(model) ? { temperature: 0.8 } : {}),
       max_completion_tokens: 4096,
@@ -158,25 +195,25 @@ export class QuestionService {
     });
 
     const raw = response.choices[0]?.message?.content;
-    if (!raw) {
-      throw new Error('Question generation returned empty content');
-    }
+    return parseQuestionsJsonContent(raw);
+  }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new Error('Question generation returned invalid JSON');
-    }
+  private async generateAiRecommendedQuestions(profile: UserProfile | null): Promise<string[]> {
+    const systemPrompt = buildAiRecommendedQuestionPrompt(profile);
+    return this.generateQuestionsViaOpenAI(
+      profile,
+      systemPrompt,
+      `Generate the ${SECTION_QUESTION_COUNT} AI-recommended practice interview questions now.`
+    );
+  }
 
-    const obj = parsed as { questions?: unknown };
-    if (!Array.isArray(obj.questions) || obj.questions.length !== SECTION_QUESTION_COUNT) {
-      throw new Error('Question generation returned wrong format');
-    }
-    if (!obj.questions.every((t) => typeof t === 'string' && t.trim().length > 0)) {
-      throw new Error('Question generation returned invalid question strings');
-    }
-
-    return obj.questions as string[];
+  private async generateDomainQuestions(profile: UserProfile | null): Promise<string[]> {
+    const systemPrompt = buildQuestionPrompt(profile);
+    const raw = await this.generateQuestionsViaOpenAI(
+      profile,
+      systemPrompt,
+      `Generate the ${SECTION_QUESTION_COUNT} domain-oriented practice interview questions now.`
+    );
+    return raw.map(stripLeadingCategoryPrefixFromTechnicalQuestion);
   }
 }

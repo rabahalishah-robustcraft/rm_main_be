@@ -88,14 +88,19 @@ export function createPracticeRoutes(services: ServiceContainer): Router {
         data: {
           sections: [
             {
-              key: 'domain',
-              title: 'Domain questions',
-              questions: sections.domain.map((text, index) => ({ index, text }))
+              key: 'ai_recommended',
+              title: 'AI recommended questions',
+              questions: sections.aiRecommended.map((text, index) => ({ index, text }))
             },
             {
               key: 'behavioral',
               title: 'Behavioral questions',
               questions: sections.behavioral.map((text, index) => ({ index, text }))
+            },
+            {
+              key: 'domain',
+              title: 'Technical questions',
+              questions: sections.domain.map((text, index) => ({ index, text }))
             }
           ],
           personalized: !!(userProfile?.targetIndustry || userProfile?.targetJobTitle)

@@ -37,10 +37,10 @@ ${fallback}
 
 Rules:
 - Return ONLY a valid JSON object. No markdown, no explanation, no preamble.
-- Mix question types: at least one behavioral, one situational, one role/skill-specific.
+- Mix question types: at least one behavioral, one situational, one role/skill-specific — but do this implicitly only. Never prefix or tag questions (e.g. no "Behavioral (accessible):", "Situational (mid-level):", "Role-specific (challenging):", or similar labels). Each string must read as a natural spoken question starting with the question itself.
 - Questions must be specific and meaningful — no generic fillers like "Tell me about yourself."
 - Each question should be answerable in 1–3 minutes by a candidate speaking aloud.
-- Vary difficulty: one accessible, one mid-level, one challenging.
+- Vary difficulty: one accessible, one mid-level, one challenging — without stating difficulty in the text.
 
 Return this exact schema:
 {

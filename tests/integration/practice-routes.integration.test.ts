@@ -36,6 +36,23 @@ describe('Practice routes and session history sessionType', () => {
     await request(app).post('/api/practice/sessions').expect(401);
   });
 
+  it('GET /api/practice/questions returns three sections in ai_recommended, behavioral, domain order', async () => {
+    await prisma.practiceQuestion.deleteMany({ where: { userId } });
+
+    const res = await request(app)
+      .get('/api/practice/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    const keys = res.body.data.sections.map((s: { key: string }) => s.key);
+    expect(keys).toEqual(['ai_recommended', 'behavioral', 'domain']);
+    for (const section of res.body.data.sections) {
+      expect(section.questions).toHaveLength(3);
+      expect(section.questions.map((q: { index: number }) => q.index)).toEqual([0, 1, 2]);
+    }
+  });
+
   it('rejects invalid sessionType on GET /api/sessions/history', async () => {
     const res = await request(app)
       .get('/api/sessions/history?sessionType=invalid')

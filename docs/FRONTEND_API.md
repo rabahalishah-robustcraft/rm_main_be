@@ -685,11 +685,29 @@ Used to sync/attach AssemblyAI job state to an existing session.
 
 **200 response**
 
+`data.sections` is ordered: **AI recommended** (OpenAI), **behavioral** (random from static pool), **technical** (OpenAI from profile / target role). Each section has three `{ index, text }` items (`index` is 0–2 within that section).
+
 ```json
 {
   "success": true,
   "data": {
-    "questions": [{ "index": 0, "text": "Tell me about yourself." }],
+    "sections": [
+      {
+        "key": "ai_recommended",
+        "title": "AI recommended questions",
+        "questions": [{ "index": 0, "text": "..." }, { "index": 1, "text": "..." }, { "index": 2, "text": "..." }]
+      },
+      {
+        "key": "behavioral",
+        "title": "Behavioral questions",
+        "questions": [{ "index": 0, "text": "..." }, { "index": 1, "text": "..." }, { "index": 2, "text": "..." }]
+      },
+      {
+        "key": "domain",
+        "title": "Technical questions",
+        "questions": [{ "index": 0, "text": "..." }, { "index": 1, "text": "..." }, { "index": 2, "text": "..." }]
+      }
+    ],
     "personalized": true
   }
 }
