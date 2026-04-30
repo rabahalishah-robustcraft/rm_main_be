@@ -97,6 +97,45 @@ describe('SubscriptionService', () => {
     });
   });
 
+  describe('assertCanForceRefreshPracticeQuestions', () => {
+    it('does nothing when forceRefresh is false', async () => {
+      mockPrisma.user.findUnique = jest.fn();
+      await expect(
+        subscriptionService.assertCanForceRefreshPracticeQuestions('user-1', false)
+      ).resolves.toBeUndefined();
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('allows paid users to force refresh', async () => {
+      mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
+        id: 'user-1',
+        subscriptionTier: SubscriptionTier.PAID
+      });
+      await expect(
+        subscriptionService.assertCanForceRefreshPracticeQuestions('user-1', true)
+      ).resolves.toBeUndefined();
+    });
+
+    it('throws PRACTICE_REFRESH_REQUIRES_UPGRADE for free users', async () => {
+      mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
+        id: 'user-1',
+        subscriptionTier: SubscriptionTier.FREE
+      });
+      await expect(
+        subscriptionService.assertCanForceRefreshPracticeQuestions('user-1', true)
+      ).rejects.toMatchObject({
+        code: 'PRACTICE_REFRESH_REQUIRES_UPGRADE'
+      });
+    });
+
+    it('throws USER_NOT_FOUND when user missing', async () => {
+      mockPrisma.user.findUnique = jest.fn().mockResolvedValue(null);
+      await expect(
+        subscriptionService.assertCanForceRefreshPracticeQuestions('missing', true)
+      ).rejects.toMatchObject({ code: 'USER_NOT_FOUND' });
+    });
+  });
+
   describe('checkUsageLimit', () => {
     it('should return true for paid users regardless of usage', async () => {
       const userId = 'user-1';

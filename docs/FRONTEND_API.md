@@ -681,7 +681,11 @@ Used to sync/attach AssemblyAI job state to an existing session.
 ### GET `/api/practice/questions`
 
 **Query**
-- `refresh` (optional): `true|false`
+- `refresh` (optional): `true|false` — **Pro (paid) only.** Forces a new question set immediately. Free users receive **403** `PRACTICE_REFRESH_REQUIRES_UPGRADE` (use normal GET; questions rotate every **24 hours** by time only — editing profile does **not** reset that timer for free).
+
+**Caching (no `refresh`)**
+- **Free:** Cached set is reused if the latest row is **under 24 hours** old (`generatedAt`). Profile changes do **not** invalidate the cache until that window ends.
+- **Paid:** Cached set is reused if under **24 hours** **and** stored industry/job title on the row still matches the user profile; otherwise regenerated on next GET.
 
 **200 response**
 
@@ -710,6 +714,19 @@ Used to sync/attach AssemblyAI job state to an existing session.
     ],
     "personalized": true
   }
+}
+```
+
+**403 response** (free tier + `?refresh=true`)
+
+```json
+{
+  "error": {
+    "code": "PRACTICE_REFRESH_REQUIRES_UPGRADE",
+    "message": "On-demand refresh is available on Pro. Free plans get new practice questions every 24 hours; updating your profile does not reset that timer."
+  },
+  "timestamp": "...",
+  "path": "/questions"
 }
 ```
 

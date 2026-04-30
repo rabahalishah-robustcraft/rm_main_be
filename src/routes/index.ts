@@ -101,7 +101,7 @@ export function createApiRoutes(services: ServiceContainer): Router {
           'GET /api/sessions/history': 'Get session history (optional query sessionType=interview|practice|all)'
         },
         practice: {
-          'GET /api/practice/questions': 'Get 3 sections (AI recommended, behavioral pool, technical/domain), 3 questions each (?refresh=true to force)',
+          'GET /api/practice/questions': 'Get 3 sections × 3 questions; free=24h cache (refresh=Pro-only); paid=refresh anytime',
           'POST /api/practice/sessions': 'Submit practice audio + question; returns coaching report (multipart)',
           'PATCH /api/practice/sessions/:id': 'Re-analyze edited answer text in place (JSON body: transcript)'
         },

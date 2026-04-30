@@ -16,7 +16,7 @@ const MAX_PRACTICE_AUDIO_BYTES = Math.min(25 * 1024 * 1024, config.MAX_FILE_SIZE
  */
 export function createPracticeRoutes(services: ServiceContainer): Router {
   const router = Router();
-  const { prisma, questionService, practiceSessionService } = services;
+  const { prisma, questionService, practiceSessionService, subscriptionService } = services;
 
   router.use(authenticate);
   router.use(requireEmailVerified);
@@ -77,13 +77,19 @@ export function createPracticeRoutes(services: ServiceContainer): Router {
     try {
       const userId = req.user!.id;
       const forceRefresh = req.query.refresh === 'true';
+      await subscriptionService.assertCanForceRefreshPracticeQuestions(userId, forceRefresh);
+
+      const usageInfo = await subscriptionService.getUsageInfo(userId);
+      const subscriptionTier = usageInfo.tier;
+
       const userProfile = await prisma.userProfile.findUnique({ where: { userId } });
       const sections = await questionService.getOrGenerateQuestionSections(
         userId,
         userProfile,
-        forceRefresh
+        forceRefresh,
+        subscriptionTier
       );
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
         data: {
           sections: [
@@ -107,8 +113,29 @@ export function createPracticeRoutes(services: ServiceContainer): Router {
         }
       });
     } catch (error) {
+      if (error instanceof SubscriptionError) {
+        if (error.code === 'PRACTICE_REFRESH_REQUIRES_UPGRADE') {
+          return res.status(403).json({
+            error: { code: error.code, message: error.message },
+            timestamp: new Date().toISOString(),
+            path: req.path
+          });
+        }
+        if (error.code === 'USER_NOT_FOUND') {
+          return res.status(404).json({
+            error: { code: error.code, message: error.message },
+            timestamp: new Date().toISOString(),
+            path: req.path
+          });
+        }
+        return res.status(400).json({
+          error: { code: error.code, message: error.message },
+          timestamp: new Date().toISOString(),
+          path: req.path
+        });
+      }
       console.error('Practice questions error:', error);
-      res.status(500).json({
+      return res.status(500).json({
         error: {
           code: 'QUESTION_GENERATION_FAILED',
           message: 'Failed to generate practice questions'

@@ -67,6 +67,34 @@ export class SubscriptionService {
       );
     }
   }
+
+  /**
+   * Paid users may call GET /api/practice/questions?refresh=true anytime.
+   * Free users must rely on the 24h rotation (profile edits do not reset the timer).
+   */
+  async assertCanForceRefreshPracticeQuestions(
+    userId: string,
+    forceRefresh: boolean
+  ): Promise<void> {
+    if (!forceRefresh) {
+      return;
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId }
+    });
+    if (!user) {
+      throw new SubscriptionError('User not found', 'USER_NOT_FOUND');
+    }
+    const tier = user.subscriptionTier.toLowerCase() as SubscriptionTier;
+    if (tier === SubscriptionTier.PAID) {
+      return;
+    }
+    throw new SubscriptionError(
+      'On-demand refresh is available on Pro. Free plans get new practice questions every 24 hours; updating your profile does not reset that timer.',
+      'PRACTICE_REFRESH_REQUIRES_UPGRADE'
+    );
+  }
+
   async checkUsageLimit(userId: string): Promise<boolean> {
     try {
       const user = await this.prisma.user.findUnique({

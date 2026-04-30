@@ -11,6 +11,7 @@ import {
   DEFAULT_COACHING_MODEL,
   modelSupportsCustomTemperature
 } from './analysisService';
+import { SubscriptionTier } from './SubscriptionService';
 
 const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 
@@ -101,13 +102,15 @@ export class QuestionService {
   async getOrGenerateQuestions(
     userId: string,
     userProfile: UserProfile | null,
-    forceRefresh = false
+    forceRefresh = false,
+    subscriptionTier: SubscriptionTier = SubscriptionTier.FREE
   ): Promise<string[]> {
     // Backward-compat wrapper: return only the domain section.
     const sections = await this.getOrGenerateQuestionSections(
       userId,
       userProfile,
-      forceRefresh
+      forceRefresh,
+      subscriptionTier
     );
     return sections.domain;
   }
@@ -117,13 +120,19 @@ export class QuestionService {
    * - aiRecommended: OpenAI, curated practice themes (distinct from technical set)
    * - domain: generated from profile/target role + industry (technical)
    * - behavioral: sampled from a static pool
+   *
+   * Free tier: cache fresh for 24h by time only (profile edits do not invalidate).
+   * Paid tier: fresh for 24h if profile industry/job title still matches row; forceRefresh bypasses when allowed by route.
    */
   async getOrGenerateQuestionSections(
     userId: string,
     userProfile: UserProfile | null,
-    forceRefresh = false
+    forceRefresh = false,
+    subscriptionTier: SubscriptionTier = SubscriptionTier.FREE
   ): Promise<PracticeQuestionSections> {
     const profile = userProfile ?? null;
+    const isPaid = subscriptionTier === SubscriptionTier.PAID;
+    const effectiveForceRefresh = isPaid && forceRefresh;
 
     const cached = await this.prisma.practiceQuestion.findFirst({
       where: { userId },
@@ -134,13 +143,18 @@ export class QuestionService {
       if (!cached) return false;
       const ageHours =
         (Date.now() - new Date(cached.generatedAt).getTime()) / (1000 * 60 * 60);
-      const contextChanged =
-        cached.industry !== (profile?.targetIndustry ?? null) ||
-        cached.jobTitle !== (profile?.targetJobTitle ?? null);
-      return ageHours < QUESTION_TTL_HOURS && !contextChanged;
+      const withinTtl = ageHours < QUESTION_TTL_HOURS;
+      if (!withinTtl) return false;
+      if (isPaid) {
+        const contextChanged =
+          cached.industry !== (profile?.targetIndustry ?? null) ||
+          cached.jobTitle !== (profile?.targetJobTitle ?? null);
+        return !contextChanged;
+      }
+      return true;
     })();
 
-    if (cached && cacheIsFresh && !forceRefresh) {
+    if (cached && cacheIsFresh && !effectiveForceRefresh) {
       const parsed = parseCachedQuestions(cached.questions as unknown);
       if (parsed?.aiRecommended && parsed?.domain && parsed?.behavioral) {
         return {

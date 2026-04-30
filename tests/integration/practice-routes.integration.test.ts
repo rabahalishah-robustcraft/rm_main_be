@@ -53,6 +53,88 @@ describe('Practice routes and session history sessionType', () => {
     }
   });
 
+  it('returns 403 for GET /api/practice/questions?refresh=true on free tier', async () => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { subscriptionTier: 'free' }
+    });
+
+    const res = await request(app)
+      .get('/api/practice/questions?refresh=true')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(403);
+
+    expect(res.body.error.code).toBe('PRACTICE_REFRESH_REQUIRES_UPGRADE');
+  });
+
+  it('free tier: profile change does not invalidate practice cache within 24h', async () => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { subscriptionTier: 'free' }
+    });
+    await prisma.practiceQuestion.deleteMany({ where: { userId } });
+    await prisma.userProfile.upsert({
+      where: { userId },
+      create: {
+        userId,
+        targetJobTitle: 'Alpha Engineer',
+        targetIndustry: 'Software'
+      },
+      update: {
+        targetJobTitle: 'Alpha Engineer',
+        targetIndustry: 'Software'
+      }
+    });
+
+    await request(app)
+      .get('/api/practice/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const rowAfterFirst = await prisma.practiceQuestion.findFirst({
+      where: { userId },
+      orderBy: { generatedAt: 'desc' }
+    });
+    expect(rowAfterFirst).not.toBeNull();
+
+    await prisma.userProfile.update({
+      where: { userId },
+      data: { targetJobTitle: 'Beta Engineer' }
+    });
+
+    await request(app)
+      .get('/api/practice/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const rowAfterSecond = await prisma.practiceQuestion.findFirst({
+      where: { userId },
+      orderBy: { generatedAt: 'desc' }
+    });
+    expect(rowAfterSecond!.id).toBe(rowAfterFirst!.id);
+  });
+
+  it('allows GET /api/practice/questions?refresh=true for paid tier', async () => {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { subscriptionTier: 'paid' }
+    });
+    await prisma.practiceQuestion.deleteMany({ where: { userId } });
+    try {
+      const res = await request(app)
+        .get('/api/practice/questions?refresh=true')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.sections).toHaveLength(3);
+    } finally {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { subscriptionTier: 'free' }
+      });
+    }
+  });
+
   it('rejects invalid sessionType on GET /api/sessions/history', async () => {
     const res = await request(app)
       .get('/api/sessions/history?sessionType=invalid')
