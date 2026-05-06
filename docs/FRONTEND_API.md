@@ -544,17 +544,22 @@ Same shape as `PUT /api/profile`, but `fullName` is required.
 
 ### POST `/api/sessions/start`
 
+Starts a **real-time interview** session (`sessionType: interview`). Quota is **per calendar month** and is **separate from practice** usage (`GET /api/subscription/info` counts practice completions only).
+
+- **Free:** up to **3** interview starts per month (rolling by `createdAt` in the current month).
+- **Paid:** unlimited interview starts.
+
 **201 response**
 
 ```json
 { "success": true, "data": { "sessionId": "cxxxxxxxxxxxxxxxxxxxxxxxx", "status": "pending", "createdAt": "2026-04-23T00:00:00.000Z" } }
 ```
 
-**429 example (usage limit)**
+**429 example (interview monthly cap)**
 
 ```json
 {
-  "error": { "code": "USAGE_LIMIT_EXCEEDED", "message": "Usage limit exceeded" },
+  "error": { "code": "INTERVIEW_SESSION_LIMIT_EXCEEDED", "message": "You have reached your monthly limit of 3 real-time interview sessions..." },
   "timestamp": "2026-04-23T00:00:00.000Z",
   "path": "/start"
 }
@@ -564,7 +569,8 @@ Same shape as `PUT /api/profile`, but `fullName` is required.
 
 **Content-Type**: `multipart/form-data`
 
-- File field: `audio` (MP3/WAV/MP4/WebM; max ~50MB)
+- File field: `audio` (MP3/WAV/MP4/WebM; max ~50MB from server config)
+- **Decoded audio duration** (not just file size): **30 minutes** max on **free**, **60 minutes** on **paid**. Exceeding returns **400** with `INTERVIEW_AUDIO_LENGTH_LIMIT_EXCEEDED`.
 
 **200 response**
 
@@ -646,6 +652,8 @@ Used to sync/attach AssemblyAI job state to an existing session.
 
 ### GET `/api/sessions/:id`
 
+For **`sessionType: interview`**, `data` includes **`sessionType`** and **`limits`**: `tier`, `maxInterviewAudioSeconds`, `interviewSessionsLimit` (`null` if paid / unlimited), `interviewSessionsUsedThisMonth`, `interviewSessionsRemaining` (`null` if paid).
+
 **200 response**
 
 ```json
@@ -653,6 +661,14 @@ Used to sync/attach AssemblyAI job state to an existing session.
   "success": true,
   "data": {
     "id": "c...",
+    "sessionType": "interview",
+    "limits": {
+      "tier": "free",
+      "maxInterviewAudioSeconds": 1800,
+      "interviewSessionsLimit": 3,
+      "interviewSessionsUsedThisMonth": 1,
+      "interviewSessionsRemaining": 2
+    },
     "displayName": null,
     "status": "completed",
     "transcript": "...",
@@ -787,6 +803,8 @@ Used to sync/attach AssemblyAI job state to an existing session.
 ## Subscription (`/api/subscription`) (auth + verified email)
 
 ### GET `/api/subscription/info`
+
+`currentUsage` / `limit` reflect **practice** completions (`usage_tracking`), not real-time interview starts. Interview caps are on `POST /api/sessions/start` and in `data.limits` on `GET /api/sessions/:id` for interview sessions.
 
 **200 response**
 

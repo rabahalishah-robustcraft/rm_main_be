@@ -16,27 +16,27 @@ The JSON must exactly match this schema:
   "attributes": {
     "clarity": {
       "score": <integer 0-100>,
-      "feedback": <2-3 sentences analyzing this attribute based on specific moments in the transcript>,
+      "feedback": <at most 2 sentences analyzing this attribute based on specific moments in the transcript>,
       "coachTip": <1-2 sentences with a concrete, actionable improvement tip>
     },
     "confidence": {
       "score": <integer 0-100>,
-      "feedback": <2-3 sentences>,
+      "feedback": <at most 2 sentences>,
       "coachTip": <1-2 sentences>
     },
     "specificity": {
       "score": <integer 0-100>,
-      "feedback": <2-3 sentences>,
+      "feedback": <at most 2 sentences>,
       "coachTip": <1-2 sentences>
     },
     "tone": {
       "score": <integer 0-100>,
-      "feedback": <2-3 sentences>,
+      "feedback": <at most 2 sentences>,
       "coachTip": <1-2 sentences>
     },
     "enthusiasm": {
       "score": <integer 0-100>,
-      "feedback": <2-3 sentences>,
+      "feedback": <at most 2 sentences>,
       "coachTip": <1-2 sentences>
     }
   },
@@ -52,6 +52,7 @@ Scoring rubric:
 - 0-59:   Needs Work
 
 Rules:
+- Each attributes.*.feedback must be at most 2 sentences total (no third sentence; keep concise)
 - feedback must reference specific things said in the transcript — never generic filler
 - coachTip should mention proven frameworks where relevant (STAR, CAR, SOAR methods, etc.)
 - strengths and focusAreas must each contain exactly 3 short phrases (3-6 words each)

@@ -417,26 +417,26 @@ Audio session routes. Base path: `/api/sessions`. All except `POST /start` enfor
 
 ### POST /api/sessions/start
 
-Start a new audio session. Uses usage limits (subscription tier).
+Start a new **interview** audio session. **Free:** max **3** interview starts per calendar month (counted by `audio_sessions` with `sessionType=interview` in the current month), independent of practice `usage_tracking`. **Paid:** unlimited.
 
 **Auth:** Yes  
 **Rate limit:** AI processing
 
 **Response:** `201` — `{ success, data: { sessionId, status, createdAt } }`  
-**Errors:** `400`, `404` (USER_NOT_FOUND), `429` (USAGE_LIMIT_EXCEEDED), `500`
+**Errors:** `400`, `404` (USER_NOT_FOUND), `429` (INTERVIEW_SESSION_LIMIT_EXCEEDED), `500`
 
 ---
 
 ### POST /api/sessions/:id/audio
 
-Upload audio for a session. Multipart: field `audio`. Audio types accepted (e.g. audio/mpeg, audio/wav). File size limit from config (e.g. 50MB).
+Upload audio for a session. Multipart: field `audio`. Audio types accepted (e.g. audio/mpeg, audio/wav). File size limit from config; **duration** caps: **30 minutes** (free), **60 minutes** (paid).
 
 **Auth:** Yes  
 **Rate limit:** Upload  
 **Params:** `id` — session CUID
 
 **Response:** `200` — `{ success, message: "Audio uploaded successfully. Processing started.", data }`  
-**Errors:** `400` (MISSING_AUDIO_FILE), `403` (SESSION_ACCESS_DENIED), `404` (SESSION_NOT_FOUND), `500`
+**Errors:** `400` (MISSING_AUDIO_FILE, INTERVIEW_AUDIO_LENGTH_LIMIT_EXCEEDED, AUDIO_DURATION_UNKNOWN), `403` (SESSION_ACCESS_DENIED), `404` (SESSION_NOT_FOUND), `500`
 
 ---
 
@@ -468,11 +468,11 @@ Update session display name (event label).
 
 ### GET /api/sessions/:id
 
-Get session details.
+Get session details. Interview sessions include `sessionType` and `limits` (tier, max interview audio seconds, monthly interview session cap / used / remaining).
 
 **Params:** `id` — session CUID
 
-**Response:** `200` — `{ success, data: { id, displayName, status, transcript, aiAnalysis, scores, analysisComplete, processingError, createdAt, updatedAt } }`  
+**Response:** `200` — `{ success, data: { id, sessionType?, limits?, displayName, status, transcript, aiAnalysis, scores, analysisComplete, processingError, createdAt, updatedAt } }`  
 **Errors:** `403`, `404`, `500`
 
 ---

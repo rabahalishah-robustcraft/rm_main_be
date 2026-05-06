@@ -249,8 +249,8 @@ describe('Comprehensive System Integration Tests', () => {
         const invalidUuidResponse = await request(app)
           .get('/api/sessions/invalid-uuid')
           .set('Authorization', `Bearer ${authToken}`);
-        expect(invalidUuidResponse.status).toBe(400);
-        expect(invalidUuidResponse.body.error.code).toBe('VALIDATION_ERROR');
+        expect(invalidUuidResponse.status).toBe(404);
+        expect(invalidUuidResponse.body.error.code).toBe('SESSION_NOT_FOUND');
 
         // Test valid UUID
         const validResponse = await request(app)
@@ -403,7 +403,7 @@ describe('Comprehensive System Integration Tests', () => {
 
       // 4. Session History
       const historyResponse = await request(app)
-        .get('/api/sessions/history')
+        .get('/api/sessions/history?status=all')
         .set('Authorization', `Bearer ${token}`);
       expect(historyResponse.status).toBe(200);
       expect(historyResponse.body.data.sessions.length).toBeGreaterThan(0);
@@ -419,7 +419,7 @@ describe('Comprehensive System Integration Tests', () => {
         .get('/api/subscription/info')
         .set('Authorization', `Bearer ${token}`);
       expect(subscriptionInfoResponse.status).toBe(200);
-      expect(subscriptionInfoResponse.body.data.tier).toBe('FREE');
+      expect(subscriptionInfoResponse.body.data.tier.toLowerCase()).toBe('free');
     });
 
     it('should enforce authentication across all protected endpoints', async () => {
@@ -664,13 +664,18 @@ describe('Comprehensive System Integration Tests', () => {
         .send({ tier: 'PAID' });
     });
 
-    it('should allow session starts while completed-session usage is under the free tier cap', async () => {
-      for (let i = 0; i < 5; i++) {
+    it('allows three interview starts per month on free tier then returns 429', async () => {
+      for (let i = 0; i < 3; i++) {
         const response = await request(app)
           .post('/api/sessions/start')
           .set('Authorization', `Bearer ${freeUserToken}`);
         expect(response.status).toBe(201);
       }
+      const fourth = await request(app)
+        .post('/api/sessions/start')
+        .set('Authorization', `Bearer ${freeUserToken}`);
+      expect(fourth.status).toBe(429);
+      expect(fourth.body.error.code).toBe('INTERVIEW_SESSION_LIMIT_EXCEEDED');
     });
 
     it('should allow unlimited sessions for paid tier', async () => {

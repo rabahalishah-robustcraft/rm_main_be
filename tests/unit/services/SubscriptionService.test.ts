@@ -12,6 +12,9 @@ const mockPrisma = {
     create: jest.fn(),
     upsert: jest.fn(),
     deleteMany: jest.fn()
+  },
+  audioSession: {
+    count: jest.fn()
   }
 } as unknown as PrismaClient;
 
@@ -133,6 +136,72 @@ describe('SubscriptionService', () => {
       await expect(
         subscriptionService.assertCanForceRefreshPracticeQuestions('missing', true)
       ).rejects.toMatchObject({ code: 'USER_NOT_FOUND' });
+    });
+  });
+
+  describe('validateInterviewSessionStart', () => {
+    it('allows paid users without counting interviews', async () => {
+      mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
+        id: 'u1',
+        subscriptionTier: SubscriptionTier.PAID
+      });
+      await expect(subscriptionService.validateInterviewSessionStart('u1')).resolves.toBeUndefined();
+      expect(mockPrisma.audioSession.count).not.toHaveBeenCalled();
+    });
+
+    it('allows free user when under 3 interview starts this month', async () => {
+      mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
+        id: 'u1',
+        subscriptionTier: SubscriptionTier.FREE
+      });
+      mockPrisma.audioSession.count = jest.fn().mockResolvedValue(2);
+      await expect(subscriptionService.validateInterviewSessionStart('u1')).resolves.toBeUndefined();
+      expect(mockPrisma.audioSession.count).toHaveBeenCalled();
+    });
+
+    it('throws INTERVIEW_SESSION_LIMIT_EXCEEDED when free user has 3+ interviews this month', async () => {
+      mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
+        id: 'u1',
+        subscriptionTier: SubscriptionTier.FREE
+      });
+      mockPrisma.audioSession.count = jest.fn().mockResolvedValue(3);
+      await expect(subscriptionService.validateInterviewSessionStart('u1')).rejects.toMatchObject({
+        code: 'INTERVIEW_SESSION_LIMIT_EXCEEDED'
+      });
+    });
+  });
+
+  describe('getInterviewPlanLimits', () => {
+    it('returns paid limits with null caps', async () => {
+      mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
+        id: 'u1',
+        subscriptionTier: SubscriptionTier.PAID
+      });
+      mockPrisma.audioSession.count = jest.fn().mockResolvedValue(5);
+      const lim = await subscriptionService.getInterviewPlanLimits('u1');
+      expect(lim).toMatchObject({
+        tier: SubscriptionTier.PAID,
+        interviewSessionsLimit: null,
+        interviewSessionsUsedThisMonth: 5,
+        interviewSessionsRemaining: null,
+        maxInterviewAudioSeconds: 60 * 60
+      });
+    });
+
+    it('returns free limits with remaining count', async () => {
+      mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
+        id: 'u1',
+        subscriptionTier: SubscriptionTier.FREE
+      });
+      mockPrisma.audioSession.count = jest.fn().mockResolvedValue(1);
+      const lim = await subscriptionService.getInterviewPlanLimits('u1');
+      expect(lim).toMatchObject({
+        tier: SubscriptionTier.FREE,
+        interviewSessionsLimit: 3,
+        interviewSessionsUsedThisMonth: 1,
+        interviewSessionsRemaining: 2,
+        maxInterviewAudioSeconds: 30 * 60
+      });
     });
   });
 

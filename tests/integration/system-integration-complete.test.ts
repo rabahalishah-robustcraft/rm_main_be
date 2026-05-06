@@ -674,7 +674,7 @@ describe('Complete System Integration Tests - Task 13.1', () => {
 
         expect(subscriptionResponse.status).toBe(200);
         expect(subscriptionResponse.body.data.tier).toBe('FREE');
-        expect(subscriptionResponse.body.data.currentUsage).toBe(1);
+        expect(subscriptionResponse.body.data.currentUsage).toBe(0);
 
       } finally {
         // Cleanup

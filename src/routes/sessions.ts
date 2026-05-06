@@ -6,6 +6,7 @@ import { enforceDataIsolation } from '../middleware/security';
 import { aiProcessingRateLimit } from '../middleware/rateLimiting';
 import { validateRequest, validationSchemas } from '../middleware/validation';
 import { AudioSessionError } from '../services/AudioSessionService';
+import { SubscriptionError } from '../services/SubscriptionService';
 import { config } from '../utils/config';
 import { formatSessionDisplayName } from '../utils/sessionDisplayName';
 
@@ -16,7 +17,7 @@ import { formatSessionDisplayName } from '../utils/sessionDisplayName';
 
 export function createSessionRoutes(services: ServiceContainer): Router {
   const router = Router();
-  const { audioSessionService } = services;
+  const { audioSessionService, subscriptionService } = services;
 
   router.use(authenticate);
   router.use(requireEmailVerified);
@@ -46,7 +47,7 @@ router.post('/start', aiProcessingRateLimit, async (req: AuthenticatedRequest, r
   try {
     const userId = req.user!.id;
 
-    // Create new session (includes usage limit validation)
+    // Create new interview session (monthly interview cap for free tier)
     const session = await audioSessionService.startSession(userId);
 
     res.status(201).json({
@@ -65,7 +66,10 @@ router.post('/start', aiProcessingRateLimit, async (req: AuthenticatedRequest, r
       // Handle specific error codes
       if (error.code === 'USER_NOT_FOUND') {
         statusCode = 404;
-      } else if (error.code === 'USAGE_LIMIT_EXCEEDED') {
+      } else if (
+        error.code === 'USAGE_LIMIT_EXCEEDED' ||
+        error.code === 'INTERVIEW_SESSION_LIMIT_EXCEEDED'
+      ) {
         statusCode = 429;
       }
       
@@ -576,33 +580,60 @@ router.get('/:id',
 
     const hasAnalysis = session.status === 'completed' && session.aiAnalysis != null;
 
-    res.status(200).json({
-      success: true,
-      data: {
-        id: session.id,
-        displayName: session.displayName ?? null,
-        status: session.status,
-        compactTranscript: session.compactTranscript,
-        editedTranscript: session.editedTranscript,
-        transcript: session.transcript,
-        aiAnalysis: session.aiAnalysis,
-        scores: hasAnalysis
-          ? {
-              overall: session.overallScore,
-              clarity: session.clarityScore,
-              confidence: session.confidenceScore,
-              specificity: session.specificityScore,
-              tone: session.toneScore,
-              enthusiasm: session.enthusiasmScore
-            }
-          : null,
-        analysisComplete: session.analysisComplete,
-        processingError: session.processingError,
-        createdAt: session.createdAt,
-        updatedAt: session.updatedAt
+    const data: Record<string, unknown> = {
+      id: session.id,
+      sessionType: session.sessionType,
+      displayName: session.displayName ?? null,
+      status: session.status,
+      compactTranscript: session.compactTranscript,
+      editedTranscript: session.editedTranscript,
+      transcript: session.transcript,
+      aiAnalysis: session.aiAnalysis,
+      scores: hasAnalysis
+        ? {
+            overall: session.overallScore,
+            clarity: session.clarityScore,
+            confidence: session.confidenceScore,
+            specificity: session.specificityScore,
+            tone: session.toneScore,
+            enthusiasm: session.enthusiasmScore
+          }
+        : null,
+      analysisComplete: session.analysisComplete,
+      processingError: session.processingError,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt
+    };
+
+    if (session.sessionType === 'interview') {
+      try {
+        const limits = await subscriptionService.getInterviewPlanLimits(userId);
+        data.limits = {
+          tier: limits.tier,
+          maxInterviewAudioSeconds: limits.maxInterviewAudioSeconds,
+          interviewSessionsLimit: limits.interviewSessionsLimit,
+          interviewSessionsUsedThisMonth: limits.interviewSessionsUsedThisMonth,
+          interviewSessionsRemaining: limits.interviewSessionsRemaining
+        };
+      } catch (limitErr) {
+        if (limitErr instanceof SubscriptionError) {
+          return res.status(500).json({
+            error: {
+              code: 'INTERVIEW_LIMITS_UNAVAILABLE',
+              message: limitErr.message
+            },
+            timestamp: new Date().toISOString(),
+            path: req.path
+          });
+        }
+        throw limitErr;
       }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data
     });
-    return;
   } catch (error) {
     if (error instanceof AudioSessionError) {
       return res.status(400).json({

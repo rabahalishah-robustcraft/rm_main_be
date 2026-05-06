@@ -35,8 +35,19 @@ export class SubscriptionError extends Error {
  * Subscription Service implementation
  * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5
  */
+export type InterviewPlanLimits = {
+  tier: SubscriptionTier;
+  /** null = unlimited (paid) */
+  interviewSessionsLimit: number | null;
+  interviewSessionsUsedThisMonth: number;
+  /** null = unlimited */
+  interviewSessionsRemaining: number | null;
+  maxInterviewAudioSeconds: number;
+};
+
 export class SubscriptionService {
-  private readonly FREE_TIER_LIMIT = 3; // 3 sessions per month for free tier
+  private readonly FREE_TIER_LIMIT = 3; // practice sessions per month (usage_tracking)
+  private readonly FREE_INTERVIEW_SESSIONS_PER_MONTH = 3;
 
   constructor(private prisma: PrismaClient) {}
 
@@ -93,6 +104,87 @@ export class SubscriptionService {
       'On-demand refresh is available on Pro. Free plans get new practice questions every 24 hours; updating your profile does not reset that timer.',
       'PRACTICE_REFRESH_REQUIRES_UPGRADE'
     );
+  }
+
+  /**
+   * Real-time interview starts (POST /api/sessions/start): free = 3 per calendar month
+   * by interview row count; independent of practice usage_tracking. Paid = unlimited.
+   */
+  async validateInterviewSessionStart(userId: string): Promise<void> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId }
+      });
+      if (!user) {
+        throw new SubscriptionError('User not found', 'USER_NOT_FOUND');
+      }
+      const tier = user.subscriptionTier.toLowerCase() as SubscriptionTier;
+      if (tier === SubscriptionTier.PAID) {
+        return;
+      }
+      const used = await this.countInterviewSessionsThisMonth(userId);
+      if (used >= this.FREE_INTERVIEW_SESSIONS_PER_MONTH) {
+        throw new SubscriptionError(
+          `You have reached your monthly limit of ${this.FREE_INTERVIEW_SESSIONS_PER_MONTH} real-time interview sessions. Upgrade for unlimited interviews or try again next month.`,
+          'INTERVIEW_SESSION_LIMIT_EXCEEDED'
+        );
+      }
+    } catch (error) {
+      if (error instanceof SubscriptionError) {
+        throw error;
+      }
+      throw new SubscriptionError(
+        'Failed to validate interview session limit',
+        'INTERVIEW_LIMIT_VALIDATION_FAILED',
+        error as Error
+      );
+    }
+  }
+
+  /** Interview rows with sessionType interview created in the current local calendar month. */
+  async countInterviewSessionsThisMonth(userId: string): Promise<number> {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return this.prisma.audioSession.count({
+      where: {
+        userId,
+        sessionType: 'interview',
+        createdAt: { gte: start, lt: end }
+      }
+    });
+  }
+
+  /**
+   * Snapshot for GET /api/sessions/:id (interview) and clients.
+   * maxInterviewAudioSeconds: 30 min free, 60 min paid (aligned with AudioSessionService upload cap).
+   */
+  async getInterviewPlanLimits(userId: string): Promise<InterviewPlanLimits> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId }
+    });
+    if (!user) {
+      throw new SubscriptionError('User not found', 'USER_NOT_FOUND');
+    }
+    const tier = user.subscriptionTier.toLowerCase() as SubscriptionTier;
+    const used = await this.countInterviewSessionsThisMonth(userId);
+    if (tier === SubscriptionTier.PAID) {
+      return {
+        tier,
+        interviewSessionsLimit: null,
+        interviewSessionsUsedThisMonth: used,
+        interviewSessionsRemaining: null,
+        maxInterviewAudioSeconds: 60 * 60
+      };
+    }
+    const limit = this.FREE_INTERVIEW_SESSIONS_PER_MONTH;
+    return {
+      tier,
+      interviewSessionsLimit: limit,
+      interviewSessionsUsedThisMonth: used,
+      interviewSessionsRemaining: Math.max(0, limit - used),
+      maxInterviewAudioSeconds: 30 * 60
+    };
   }
 
   async checkUsageLimit(userId: string): Promise<boolean> {

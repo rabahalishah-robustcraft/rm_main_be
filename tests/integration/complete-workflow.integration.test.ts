@@ -167,6 +167,13 @@ describe('Complete User Workflow Integration Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.data.id).toBe(sessionId);
+      expect(response.body.data.sessionType).toBe('interview');
+      expect(response.body.data.limits).toMatchObject({
+        tier: 'free',
+        maxInterviewAudioSeconds: 30 * 60,
+        interviewSessionsLimit: 3,
+        interviewSessionsRemaining: expect.any(Number)
+      });
       expect(String(response.body.data.status).toLowerCase()).toBe('pending');
     });
 
@@ -181,7 +188,7 @@ describe('Complete User Workflow Integration Tests', () => {
   });
 
   describe('4. Subscription Limits', () => {
-    it('should allow multiple pending session starts before usage is incremented', async () => {
+    it('allows up to 3 interview starts per month on free tier then blocks the 4th', async () => {
       const session2Response = await request(app)
         .post('/api/sessions/start')
         .set('Authorization', `Bearer ${authToken}`);
@@ -195,7 +202,8 @@ describe('Complete User Workflow Integration Tests', () => {
       const session4Response = await request(app)
         .post('/api/sessions/start')
         .set('Authorization', `Bearer ${authToken}`);
-      expect(session4Response.status).toBe(201);
+      expect(session4Response.status).toBe(429);
+      expect(session4Response.body.error.code).toBe('INTERVIEW_SESSION_LIMIT_EXCEEDED');
     });
 
     it('should get subscription info', async () => {

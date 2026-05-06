@@ -52,9 +52,21 @@ const IN_FLIGHT_STATUSES = [
 
 /** Max interview recording length (seconds) for real-time session upload by subscription tier. */
 const INTERVIEW_AUDIO_MAX_SECONDS: Record<SubscriptionTier, number> = {
-  [SubscriptionTier.FREE]: 25 * 60,
-  [SubscriptionTier.PAID]: 3 * 60 * 60
+  [SubscriptionTier.FREE]: 30 * 60,
+  [SubscriptionTier.PAID]: 60 * 60
 };
+
+function formatAudioDurationLimitLabel(maxSeconds: number): string {
+  if (maxSeconds % 3600 === 0 && maxSeconds >= 3600) {
+    const h = maxSeconds / 3600;
+    return h === 1 ? '1 hour' : `${h} hours`;
+  }
+  if (maxSeconds % 60 === 0) {
+    const m = maxSeconds / 60;
+    return m === 1 ? '1 minute' : `${m} minutes`;
+  }
+  return `${maxSeconds} seconds`;
+}
 
 /**
  * Duration from a linear PCM WAVE file (fmt + data chunks). Returns undefined if not PCM RIFF/WAVE.
@@ -149,7 +161,7 @@ export class AudioSessionService {
         throw new AudioSessionError('User not found', 'USER_NOT_FOUND');
       }
 
-      await this.subscriptionService.validateUsageLimit(userId);
+      await this.subscriptionService.validateInterviewSessionStart(userId);
 
       const now = new Date();
       const session = await this.prisma.audioSession.create({
@@ -220,7 +232,7 @@ export class AudioSessionService {
         );
       }
       if (durationSeconds > maxAudioSeconds) {
-        const limitLabel = tier === SubscriptionTier.PAID ? '3 hours' : '25 minutes';
+        const limitLabel = formatAudioDurationLimitLabel(maxAudioSeconds);
         throw new AudioSessionError(
           `Interview audio exceeds the maximum length (${limitLabel}) for your plan.`,
           'INTERVIEW_AUDIO_LENGTH_LIMIT_EXCEEDED'
@@ -476,8 +488,6 @@ export class AudioSessionService {
         status: SessionStatus.COMPLETED
       }
     });
-
-    await this.subscriptionService.incrementUsage(session.userId);
 
     const updated = await this.getSession(sessionId);
     if (!updated) {
