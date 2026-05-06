@@ -63,6 +63,26 @@ const configSchema = Joi.object({
   // Subscription Configuration
   FREE_TIER_MONTHLY_LIMIT: Joi.number().integer().min(0).default(3),
   PAID_TIER_MONTHLY_LIMIT: Joi.number().integer().min(-1).default(-1), // -1 = unlimited
+
+  // Stripe Billing (optional in test; set for Checkout + webhooks)
+  STRIPE_SECRET_KEY: Joi.string().optional().allow(''),
+  STRIPE_PRICE_ID: Joi.string().optional().allow(''),
+  STRIPE_WEBHOOK_SECRET: Joi.string().optional().allow(''),
+  STRIPE_CHECKOUT_SUCCESS_URL: Joi.string().uri().optional().allow(''),
+  STRIPE_CHECKOUT_CANCEL_URL: Joi.string().uri().optional().allow(''),
+  /** Return URL after Customer Portal session (Settings → Billing portal in Dashboard) */
+  STRIPE_BILLING_PORTAL_RETURN_URL: Joi.string().uri().optional().allow(''),
+  /**
+   * Customer Portal configuration id (bpc_...). Required for cancellations/customization to match what you set in Dashboard — without it, Stripe may use a default portal without cancel.
+   * Stripe Dashboard → Settings → Billing → Customer portal → copy configuration id, or API: BillingPortal.Configuration list.
+   */
+  STRIPE_BILLING_PORTAL_CONFIGURATION_ID: Joi.string().optional().allow(''),
+  /**
+   * Optional HTTPS origin for your app’s web pages (Expo deep-link landing pages, etc.).
+   * When set, success/cancel/portal URLs default to {base}/billing/success, /billing/canceled, /billing
+   * if those STRIPE_*_URL vars are omitted.
+   */
+  STRIPE_PUBLIC_APP_BASE_URL: Joi.string().uri().optional().allow(''),
   
   // Monitoring Configuration
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
@@ -144,6 +164,15 @@ export interface Config {
   // Subscription Configuration
   FREE_TIER_MONTHLY_LIMIT: number;
   PAID_TIER_MONTHLY_LIMIT: number;
+
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_PRICE_ID?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  STRIPE_CHECKOUT_SUCCESS_URL?: string;
+  STRIPE_CHECKOUT_CANCEL_URL?: string;
+  STRIPE_BILLING_PORTAL_RETURN_URL?: string;
+  STRIPE_BILLING_PORTAL_CONFIGURATION_ID?: string;
+  STRIPE_PUBLIC_APP_BASE_URL?: string;
   
   // Monitoring Configuration
   LOG_LEVEL: string;
@@ -179,6 +208,24 @@ function normalizeEnvString(s: string | undefined): string | undefined {
   return t === '' ? undefined : t;
 }
 
+/** Fill Stripe redirect URLs from STRIPE_PUBLIC_APP_BASE_URL when individual URLs are unset. */
+function applyStripeRedirectDefaults(
+  publicBase: string | undefined,
+  success: string | undefined,
+  cancel: string | undefined,
+  portal: string | undefined
+): { success?: string; cancel?: string; portal?: string } {
+  const b = publicBase?.replace(/\/$/, '');
+  if (!b) {
+    return { success, cancel, portal };
+  }
+  return {
+    success: success || `${b}/billing/success`,
+    cancel: cancel || `${b}/billing/canceled`,
+    portal: portal || `${b}/billing`
+  };
+}
+
 /**
  * Validate and load configuration
  */
@@ -197,13 +244,30 @@ function loadConfig(): Config {
   }
 
   const v = value as Config;
+  const stripePublicBase = normalizeEnvString(v.STRIPE_PUBLIC_APP_BASE_URL);
+  let stripeSuccess = normalizeEnvString(v.STRIPE_CHECKOUT_SUCCESS_URL);
+  let stripeCancel = normalizeEnvString(v.STRIPE_CHECKOUT_CANCEL_URL);
+  let stripePortalReturn = normalizeEnvString(v.STRIPE_BILLING_PORTAL_RETURN_URL);
+  const derived = applyStripeRedirectDefaults(stripePublicBase, stripeSuccess, stripeCancel, stripePortalReturn);
+  stripeSuccess = derived.success;
+  stripeCancel = derived.cancel;
+  stripePortalReturn = derived.portal;
+
   return {
     ...v,
     ASSEMBLYAI_API_KEY: normalizeEnvString(v.ASSEMBLYAI_API_KEY),
     ASSEMBLYAI_WEBHOOK_SECRET: normalizeEnvString(v.ASSEMBLYAI_WEBHOOK_SECRET),
     WEBHOOK_BASE_URL: normalizeEnvString(v.WEBHOOK_BASE_URL),
     COACHING_MODEL: normalizeEnvString(v.COACHING_MODEL),
-    ASSEMBLYAI_SPEECH_MODELS: normalizeEnvString(v.ASSEMBLYAI_SPEECH_MODELS)
+    ASSEMBLYAI_SPEECH_MODELS: normalizeEnvString(v.ASSEMBLYAI_SPEECH_MODELS),
+    STRIPE_SECRET_KEY: normalizeEnvString(v.STRIPE_SECRET_KEY),
+    STRIPE_PRICE_ID: normalizeEnvString(v.STRIPE_PRICE_ID),
+    STRIPE_WEBHOOK_SECRET: normalizeEnvString(v.STRIPE_WEBHOOK_SECRET),
+    STRIPE_CHECKOUT_SUCCESS_URL: stripeSuccess,
+    STRIPE_CHECKOUT_CANCEL_URL: stripeCancel,
+    STRIPE_BILLING_PORTAL_RETURN_URL: stripePortalReturn,
+    STRIPE_BILLING_PORTAL_CONFIGURATION_ID: normalizeEnvString(v.STRIPE_BILLING_PORTAL_CONFIGURATION_ID),
+    STRIPE_PUBLIC_APP_BASE_URL: stripePublicBase
   };
 }
 

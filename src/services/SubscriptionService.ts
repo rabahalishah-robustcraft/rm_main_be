@@ -15,6 +15,9 @@ export interface UsageInfo {
   limit: number | null; // null indicates unlimited
   canCreateSession: boolean;
   tier: SubscriptionTier;
+  stripeSubscriptionId?: string | null;
+  stripeSubscriptionStatus?: string | null;
+  stripeCurrentPeriodEnd?: string | null;
 }
 
 /**
@@ -284,12 +287,19 @@ export class SubscriptionService {
       const currentMonth = currentDate.getMonth() + 1;
       const currentYear = currentDate.getFullYear();
 
+      const stripeExtra = {
+        stripeSubscriptionId: user.stripeSubscriptionId ?? null,
+        stripeSubscriptionStatus: user.stripeSubscriptionStatus ?? null,
+        stripeCurrentPeriodEnd: user.stripeCurrentPeriodEnd?.toISOString() ?? null
+      };
+
       if (tier === SubscriptionTier.PAID) {
         return {
           currentUsage: 0,
           limit: null, // null indicates unlimited
           canCreateSession: true,
-          tier
+          tier,
+          ...stripeExtra
         };
       }
 
@@ -299,7 +309,8 @@ export class SubscriptionService {
         currentUsage: usage.sessionCount,
         limit: this.FREE_TIER_LIMIT,
         canCreateSession: usage.sessionCount < this.FREE_TIER_LIMIT,
-        tier
+        tier,
+        ...stripeExtra
       };
     } catch (error) {
       if (error instanceof SubscriptionError) {

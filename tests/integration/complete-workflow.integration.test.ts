@@ -218,13 +218,13 @@ describe('Complete User Workflow Integration Tests', () => {
     });
 
     it('should allow subscription upgrade', async () => {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { subscriptionTier: 'paid' }
+      });
       const response = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          tier: 'PAID'
-        });
-
+        .get('/api/subscription/info')
+        .set('Authorization', `Bearer ${authToken}`);
       expect(response.status).toBe(200);
       expect(String(response.body.data.tier).toLowerCase()).toBe('paid');
     });

@@ -330,27 +330,14 @@ describe('Comprehensive System Integration Tests', () => {
         authToken = session.token;
       });
 
-      it('should validate subscription upgrade input', async () => {
-        // Test invalid tier
-        const invalidTierResponse = await request(app)
-          .post('/api/subscription/upgrade')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send({ tier: 'INVALID_TIER' });
-        expect(invalidTierResponse.status).toBe(400);
+      it('should require auth for subscription checkout session', async () => {
+        const unauth = await request(app).post('/api/subscription/checkout-session');
+        expect(unauth.status).toBe(401);
 
-        // Test missing tier
-        const missingTierResponse = await request(app)
-          .post('/api/subscription/upgrade')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send({});
-        expect(missingTierResponse.status).toBe(400);
-
-        // Test valid tier
-        const validResponse = await request(app)
-          .post('/api/subscription/upgrade')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send({ tier: 'PAID' });
-        expect(validResponse.status).toBe(200);
+        const authed = await request(app)
+          .post('/api/subscription/checkout-session')
+          .set('Authorization', `Bearer ${authToken}`);
+        expect([200, 502, 503]).toContain(authed.status);
       });
     });
   });
@@ -658,10 +645,13 @@ describe('Comprehensive System Integration Tests', () => {
         token: paidUserToken
       });
 
-      await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${paidUserToken}`)
-        .send({ tier: 'PAID' });
+      const paidUser = testUsers.find((u) => u.email === 'comprehensive-test-paid@example.com');
+      if (paidUser) {
+        await prisma.user.update({
+          where: { id: paidUser.id },
+          data: { subscriptionTier: 'paid' }
+        });
+      }
     });
 
     it('allows three interview starts per month on free tier then returns 429', async () => {

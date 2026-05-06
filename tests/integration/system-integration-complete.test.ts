@@ -556,30 +556,9 @@ describe('Complete System Integration Tests - Task 13.1', () => {
     });
 
     describe('Subscription Endpoint Validation', () => {
-      it('should validate subscription upgrade input comprehensively', async () => {
-        const testCases = [
-          { input: { tier: 'INVALID_TIER' }, description: 'invalid tier' },
-          { input: {}, description: 'missing tier' },
-          { input: { tier: 123 }, description: 'numeric tier' },
-          { input: { tier: null }, description: 'null tier' }
-        ];
-
-        for (const testCase of testCases) {
-          const response = await request(app)
-            .post('/api/subscription/upgrade')
-            .set('Authorization', `Bearer ${user().token}`)
-            .send(testCase.input);
-
-          expect(response.status).toBe(400);
-        }
-
-        // Valid tier should work
-        const validResponse = await request(app)
-          .post('/api/subscription/upgrade')
-          .set('Authorization', `Bearer ${user().token}`)
-          .send({ tier: 'PAID' });
-
-        expect(validResponse.status).toBe(200);
+      it('should require authentication for checkout session', async () => {
+        const response = await request(app).post('/api/subscription/checkout-session');
+        expect(response.status).toBe(401);
       });
     });
 
@@ -673,7 +652,7 @@ describe('Complete System Integration Tests - Task 13.1', () => {
           .set('Authorization', `Bearer ${token}`);
 
         expect(subscriptionResponse.status).toBe(200);
-        expect(subscriptionResponse.body.data.tier).toBe('FREE');
+        expect(subscriptionResponse.body.data.tier).toBe('free');
         expect(subscriptionResponse.body.data.currentUsage).toBe(0);
 
       } finally {
@@ -698,13 +677,10 @@ describe('Complete System Integration Tests - Task 13.1', () => {
 
       expect(initialResponse.status).toBe(200);
 
-      // Upgrade subscription
-      const upgradeResponse = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${user.token}`)
-        .send({ tier: 'PAID' });
-
-      expect(upgradeResponse.status).toBe(200);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { subscriptionTier: 'paid' }
+      });
 
       // Verify upgrade
       const verifyResponse = await request(app)
@@ -712,7 +688,7 @@ describe('Complete System Integration Tests - Task 13.1', () => {
         .set('Authorization', `Bearer ${user.token}`);
 
       expect(verifyResponse.status).toBe(200);
-      expect(verifyResponse.body.data.tier).toBe('PAID');
+      expect(String(verifyResponse.body.data.tier).toLowerCase()).toBe('paid');
     });
 
     it('should handle error scenarios gracefully', async () => {

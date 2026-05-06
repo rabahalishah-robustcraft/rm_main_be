@@ -17,6 +17,10 @@ model User {
   authProvider            String    @default("local") // "local" | "google"
   googleId                String?   @unique // Google sub claim, for linking
   subscriptionTier        String    @default("free")
+  stripeCustomerId        String?   @unique
+  stripeSubscriptionId    String?   @unique
+  stripeSubscriptionStatus String?
+  stripeCurrentPeriodEnd  DateTime?
   emailVerified           Boolean   @default(false)
   pendingEmail            String?   @unique // proposed address until verified via OTP
   onboardingCompletedAt   DateTime?

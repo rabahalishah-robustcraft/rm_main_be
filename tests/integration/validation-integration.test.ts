@@ -239,34 +239,9 @@ describe('Validation Integration Tests', () => {
   });
 
   describe('Subscription Endpoint Validation', () => {
-    it('should validate subscription upgrade input', async () => {
-      // Invalid tier
-      const invalidTierResponse = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          tier: 'INVALID_TIER'
-        });
-
-      expect(invalidTierResponse.status).toBe(400);
-
-      // Missing tier
-      const missingTierResponse = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({});
-
-      expect(missingTierResponse.status).toBe(400);
-
-      // Valid tier
-      const validResponse = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          tier: 'PAID'
-        });
-
-      expect(validResponse.status).toBe(200);
+    it('should require authentication for checkout session', async () => {
+      const response = await request(app).post('/api/subscription/checkout-session');
+      expect(response.status).toBe(401);
     });
   });
 
@@ -397,7 +372,7 @@ describe('Validation Integration Tests', () => {
         { method: 'post', path: '/api/auth/login', body: { email: 'invalid' } },
         { method: 'put', path: '/api/profile', body: {}, auth: true },
         { method: 'get', path: '/api/sessions/invalid-uuid', auth: true },
-        { method: 'post', path: '/api/subscription/upgrade', body: { tier: 'INVALID' }, auth: true }
+        { method: 'get', path: '/api/dashboard/insights?limit=100', auth: true }
       ];
 
       for (const endpoint of endpoints) {

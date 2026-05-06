@@ -108,25 +108,32 @@ async function createApp() {
     app.use('/api', apiRateLimitExcludingWebhooks);
   }
 
-  // Raw JSON body for AssemblyAI webhook HMAC / signature flows (must run before express.json)
+  const rawJsonWebhookParser = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const buf = req.body as Buffer;
+    if (Buffer.isBuffer(buf)) {
+      req.rawBody = buf;
+      try {
+        req.body = buf.length ? JSON.parse(buf.toString('utf8')) : {};
+      } catch {
+        req.body = {};
+      }
+    } else {
+      req.rawBody = Buffer.alloc(0);
+      req.body = req.body ?? {};
+    }
+    next();
+  };
+
+  // Raw JSON body for AssemblyAI + Stripe webhooks (must run before express.json)
   app.use(
     '/api/webhooks/assemblyai',
     express.raw({ type: 'application/json', limit: '2mb' }),
-    (req, res, next) => {
-      const buf = req.body as Buffer;
-      if (Buffer.isBuffer(buf)) {
-        req.rawBody = buf;
-        try {
-          req.body = buf.length ? JSON.parse(buf.toString('utf8')) : {};
-        } catch {
-          req.body = {};
-        }
-      } else {
-        req.rawBody = Buffer.alloc(0);
-        req.body = req.body ?? {};
-      }
-      next();
-    }
+    rawJsonWebhookParser
+  );
+  app.use(
+    '/api/webhooks/stripe',
+    express.raw({ type: 'application/json', limit: '2mb' }),
+    rawJsonWebhookParser
   );
 
   // Body parsing middleware (must run before abuse detection so body/query strings are inspectable)

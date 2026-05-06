@@ -7,6 +7,12 @@ import { safeEmailVerificationOTPDeleteMany } from './helpers/safePrismaCleanup'
 
 const prisma = new PrismaClient();
 
+const stripeFields = {
+  stripeSubscriptionId: null,
+  stripeSubscriptionStatus: null,
+  stripeCurrentPeriodEnd: null
+};
+
 describe('Subscription Routes Integration Tests', () => {
   let app: any;
   let authToken: string;
@@ -81,13 +87,14 @@ describe('Subscription Routes Integration Tests', () => {
           tier: SubscriptionTier.FREE,
           currentUsage: 0,
           limit: 3,
-          canCreateSession: true
+          canCreateSession: true,
+          ...stripeFields
         }
       });
     });
 
     it('should return subscription info for paid user', async () => {
-      // Upgrade user to paid tier
+      // Upgrade user to paid tier (simulates successful Stripe webhook)
       await prisma.user.update({
         where: { id: userId },
         data: { subscriptionTier: SubscriptionTier.PAID }
@@ -104,7 +111,8 @@ describe('Subscription Routes Integration Tests', () => {
           tier: SubscriptionTier.PAID,
           currentUsage: 0,
           limit: null,
-          canCreateSession: true
+          canCreateSession: true,
+          ...stripeFields
         }
       });
     });
@@ -116,82 +124,11 @@ describe('Subscription Routes Integration Tests', () => {
     });
   });
 
-  describe('POST /api/subscription/upgrade', () => {
-    it('should upgrade subscription to paid tier', async () => {
-      const response = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ tier: SubscriptionTier.PAID })
-        .expect(200);
-
-      expect(response.body).toEqual({
-        success: true,
-        message: 'Subscription upgraded to paid tier successfully',
-        data: {
-          tier: SubscriptionTier.PAID
-        }
-      });
-
-      // Verify user was upgraded in database
-      const user = await prisma.user.findUnique({
-        where: { id: userId }
-      });
-      expect(user?.subscriptionTier).toBe(SubscriptionTier.PAID);
-    });
-
-    it('should allow downgrade to free tier', async () => {
-      // First upgrade to paid
-      await prisma.user.update({
-        where: { id: userId },
-        data: { subscriptionTier: SubscriptionTier.PAID }
-      });
-
-      const response = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ tier: SubscriptionTier.FREE })
-        .expect(200);
-
-      expect(response.body).toEqual({
-        success: true,
-        message: 'Subscription upgraded to free tier successfully',
-        data: {
-          tier: SubscriptionTier.FREE
-        }
-      });
-
-      // Verify user was downgraded in database
-      const user = await prisma.user.findUnique({
-        where: { id: userId }
-      });
-      expect(user?.subscriptionTier).toBe(SubscriptionTier.FREE);
-    });
-
-    it('should reject invalid tier', async () => {
-      const response = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ tier: 'invalid' })
-        .expect(400);
-
-      expect(response.body.error.code).toBe('INVALID_TIER');
-    });
-
+  describe('POST /api/subscription/checkout-session', () => {
     it('should require authentication', async () => {
       await request(app)
-        .post('/api/subscription/upgrade')
-        .send({ tier: SubscriptionTier.PAID })
+        .post('/api/subscription/checkout-session')
         .expect(401);
-    });
-
-    it('should require tier in request body', async () => {
-      const response = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({})
-        .expect(400);
-
-      expect(response.body.error.code).toBe('INVALID_TIER');
     });
   });
 });

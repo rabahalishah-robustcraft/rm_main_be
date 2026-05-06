@@ -297,15 +297,6 @@ export const validationSchemas = {
     }
   },
 
-  // Subscription endpoints
-  subscription: {
-    upgrade: {
-      body: Joi.object({
-        tier: Joi.string().valid('FREE', 'PAID').required()
-      })
-    }
-  },
-
   // Dashboard endpoints
   dashboard: {
     insights: {

@@ -328,7 +328,10 @@ describe('SubscriptionService', () => {
       const userId = 'user-1';
       mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
         id: userId,
-        subscriptionTier: SubscriptionTier.PAID
+        subscriptionTier: SubscriptionTier.PAID,
+        stripeSubscriptionId: null,
+        stripeSubscriptionStatus: null,
+        stripeCurrentPeriodEnd: null
       });
 
       const result = await subscriptionService.getUsageInfo(userId);
@@ -337,7 +340,10 @@ describe('SubscriptionService', () => {
         currentUsage: 0,
         limit: null,
         canCreateSession: true,
-        tier: SubscriptionTier.PAID
+        tier: SubscriptionTier.PAID,
+        stripeSubscriptionId: null,
+        stripeSubscriptionStatus: null,
+        stripeCurrentPeriodEnd: null
       });
     });
 
@@ -349,7 +355,10 @@ describe('SubscriptionService', () => {
 
       mockPrisma.user.findUnique = jest.fn().mockResolvedValue({
         id: userId,
-        subscriptionTier: SubscriptionTier.FREE
+        subscriptionTier: SubscriptionTier.FREE,
+        stripeSubscriptionId: null,
+        stripeSubscriptionStatus: null,
+        stripeCurrentPeriodEnd: null
       });
 
       mockPrisma.usageTracking.findUnique = jest.fn().mockResolvedValue({
@@ -365,7 +374,10 @@ describe('SubscriptionService', () => {
         currentUsage: 2,
         limit: 3,
         canCreateSession: true,
-        tier: SubscriptionTier.FREE
+        tier: SubscriptionTier.FREE,
+        stripeSubscriptionId: null,
+        stripeSubscriptionStatus: null,
+        stripeCurrentPeriodEnd: null
       });
     });
   });

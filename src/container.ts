@@ -16,6 +16,7 @@ import { AudioSessionService } from './services/AudioSessionService';
 import { PracticeSessionService } from './services/practiceSessionService';
 import { QuestionService } from './services/questionService';
 import { SubscriptionService } from './services/SubscriptionService';
+import { StripeBillingService } from './services/StripeBillingService';
 import { DashboardService } from './services/DashboardService';
 import { OpenAIService } from './services/OpenAIService';
 import { S3Service, createS3Service } from './services/S3Service';
@@ -32,6 +33,7 @@ export interface ServiceContainer {
   questionService: QuestionService;
   practiceSessionService: PracticeSessionService;
   subscriptionService: SubscriptionService;
+  stripeBillingService: StripeBillingService;
   dashboardService: DashboardService;
   
   // External service integrations
@@ -115,6 +117,7 @@ class Container {
       config.GOOGLE_CLIENT_ID
     );
     const subscriptionService = new SubscriptionService(prisma);
+    const stripeBillingService = new StripeBillingService(prisma);
     const dashboardService = new DashboardService(prisma);
     const profileService = new ProfileService(s3Service, openaiService, prisma);
     const onboardingService = new OnboardingService(profileService, openaiService, s3Service, prisma);
@@ -139,6 +142,7 @@ class Container {
       questionService,
       practiceSessionService,
       subscriptionService,
+      stripeBillingService,
       dashboardService,
       openaiService,
       s3Service,

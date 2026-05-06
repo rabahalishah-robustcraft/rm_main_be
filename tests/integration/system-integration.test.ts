@@ -89,6 +89,7 @@ describe('System Integration Tests', () => {
       expect(services.profileService).toBeDefined();
       expect(services.audioSessionService).toBeDefined();
       expect(services.subscriptionService).toBeDefined();
+      expect(services.stripeBillingService).toBeDefined();
       expect(services.dashboardService).toBeDefined();
       expect(services.openaiService).toBeDefined();
       expect(services.s3Service).toBeDefined();
@@ -232,14 +233,10 @@ describe('System Integration Tests', () => {
       expect(infoResponse.body.data.currentUsage).toBe(0);
       expect(infoResponse.body.data.canCreateSession).toBe(true);
 
-      const upgradeResponse = await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          tier: 'PAID'
-        });
-
-      expect(upgradeResponse.status).toBe(200);
+      await prisma.user.update({
+        where: { id: testUserId },
+        data: { subscriptionTier: 'paid' }
+      });
 
       const updatedInfoResponse = await request(app)
         .get('/api/subscription/info')

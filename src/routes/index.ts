@@ -106,11 +106,13 @@ export function createApiRoutes(services: ServiceContainer): Router {
           'PATCH /api/practice/sessions/:id': 'Re-analyze edited answer text in place (JSON body: transcript)'
         },
         webhooks: {
-          'POST /api/webhooks/assemblyai': 'AssemblyAI transcription completion callback (no JWT)'
+          'POST /api/webhooks/assemblyai': 'AssemblyAI transcription completion callback (no JWT)',
+          'POST /api/webhooks/stripe': 'Stripe Billing webhooks (signed; raw JSON)'
         },
         subscription: {
           'GET /api/subscription/info': 'Get subscription and usage information',
-          'POST /api/subscription/upgrade': 'Upgrade subscription tier'
+          'POST /api/subscription/checkout-session': 'Create Stripe Checkout session (returns url)',
+          'POST /api/subscription/billing-portal': 'Create Stripe Customer Portal session (returns url); optional body { intent: "cancel_subscription" } for cancel deep link'
         },
         dashboard: {
           'GET /api/dashboard/stats': 'Get comprehensive dashboard statistics',
