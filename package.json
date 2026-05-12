@@ -2,7 +2,7 @@
   "name": "ai-audio-summarization-backend",
   "version": "1.0.0",
   "description": "TypeScript/Node.js/Express backend for AI-powered interview practice platform",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/src/index.js",
