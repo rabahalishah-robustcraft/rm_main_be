@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { ServiceContainer } from '../container';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requireEmailVerified } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { validateRequest, validationSchemas } from '../middleware/validation';
 import { User } from '../types/auth';
@@ -29,6 +29,7 @@ export function createDashboardRoutes(services: ServiceContainer): Router {
    */
   router.get('/stats', 
     authenticate,
+    requireEmailVerified,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const userId = req.user!.id;
       
@@ -45,6 +46,7 @@ export function createDashboardRoutes(services: ServiceContainer): Router {
    */
   router.get('/insights',
     authenticate,
+    requireEmailVerified,
     validateRequest(validationSchemas.dashboard.insights),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const userId = req.user!.id;
@@ -66,6 +68,7 @@ export function createDashboardRoutes(services: ServiceContainer): Router {
    */
   router.get('/trends',
     authenticate,
+    requireEmailVerified,
     validateRequest(validationSchemas.dashboard.trends),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const userId = req.user!.id;

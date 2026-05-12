@@ -11,19 +11,27 @@ datasource db {
 }
 
 model User {
-  id               String    @id @default(cuid())
-  email            String    @unique
-  passwordHash     String?   // nullable for Google OAuth users
-  authProvider     String    @default("local") // "local" | "google"
-  googleId         String?   @unique // Google sub claim, for linking
-  subscriptionTier String    @default("free")
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                      String    @id @default(cuid())
+  email                   String    @unique
+  passwordHash            String?   // nullable for Google OAuth users
+  authProvider            String    @default("local") // "local" | "google"
+  googleId                String?   @unique // Google sub claim, for linking
+  subscriptionTier        String    @default("free")
+  stripeCustomerId        String?   @unique
+  stripeSubscriptionId    String?   @unique
+  stripeSubscriptionStatus String?
+  stripeCurrentPeriodEnd  DateTime?
+  emailVerified           Boolean   @default(false)
+  pendingEmail            String?   @unique // proposed address until verified via OTP
+  onboardingCompletedAt   DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   // Relations
-  profile        UserProfile?
-  audioSessions  AudioSession[]
-  usageTracking  UsageTracking[]
+  profile           UserProfile?
+  audioSessions     AudioSession[]
+  usageTracking     UsageTracking[]
+  practiceQuestions PracticeQuestion[]
 
   @@map("users")
 }
@@ -37,6 +45,17 @@ model PasswordResetOTP {
 
   @@index([email, expiresAt])
   @@map("password_reset_otps")
+}
+
+model EmailVerificationOTP {
+  id        String   @id @default(cuid())
+  email     String
+  otpHash   String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, expiresAt])
+  @@map("email_verification_otps")
 }
 
 model UserProfile {
@@ -76,6 +95,7 @@ model UserProfile {
 model AudioSession {
   id               String    @id @default(cuid())
   userId           String
+  sessionType      String    @default("interview") // "interview" | "practice"
   audioS3Key       String
   displayName      String?   // User-editable event label/name
   transcript       String?
@@ -87,6 +107,12 @@ model AudioSession {
   specificityScore Int?
   status           String    @default("pending")
   processingError  String?   // Error message when status is failed (e.g. parse or API error)
+
+  assemblyJobId     String?   @unique
+  compactTranscript Json?
+  editedTranscript  Json?
+  overallScore      Int?
+
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -94,6 +120,19 @@ model AudioSession {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("audio_sessions")
+}
+
+model PracticeQuestion {
+  id          String   @id @default(cuid())
+  userId      String
+  questions   Json
+  generatedAt DateTime @default(now())
+  industry    String?
+  jobTitle    String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("practice_questions")
 }
 
 model UsageTracking {

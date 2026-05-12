@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from './auth';
 import prisma from '../lib/prisma';
+import { config } from '../utils/config';
 
 /**
  * Data isolation middleware - ensures users can only access their own data
@@ -352,9 +353,9 @@ export const validateRequest = (req: Request, res: Response, next: NextFunction)
     }
   }
 
-  // Check request size limits
-  const contentLength = parseInt(req.get('Content-Length') || '0');
-  const maxSize = 50 * 1024 * 1024; // 50MB limit
+  // Check request size limits (aligned with multer / express body — see MAX_FILE_SIZE in config)
+  const contentLength = parseInt(req.get('Content-Length') || '0', 10);
+  const maxSize = config.MAX_FILE_SIZE;
 
   if (contentLength > maxSize) {
     res.status(413).json({

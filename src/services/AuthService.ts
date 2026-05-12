@@ -1,6 +1,14 @@
 import * as bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
-import { User, AuthService as IAuthService, SubscriptionTier, AuthenticationError, ValidationError } from '../types/auth';
+import {
+  User,
+  AuthService as IAuthService,
+  SubscriptionTier,
+  AuthenticationError,
+  ValidationError,
+  ExternalServiceError,
+  EmailNotVerifiedError
+} from '../types/auth';
 import { hashPassword, verifyPassword, validatePassword } from '../utils/password';
 import { generateToken, validateToken, generateResetToken, validateResetToken } from '../utils/jwt';
 import { PrismaClient } from '@prisma/client';
@@ -26,6 +34,9 @@ export class AuthService implements IAuthService {
     email: string;
     passwordHash: string | null;
     subscriptionTier: string;
+    emailVerified: boolean;
+    pendingEmail?: string | null;
+    onboardingCompletedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
   }): User {
@@ -34,87 +45,209 @@ export class AuthService implements IAuthService {
       email: dbUser.email,
       passwordHash: dbUser.passwordHash,
       subscriptionTier: dbUser.subscriptionTier as SubscriptionTier,
+      emailVerified: dbUser.emailVerified,
+      pendingEmail: dbUser.pendingEmail ?? null,
+      onboardingCompletedAt: dbUser.onboardingCompletedAt,
       createdAt: dbUser.createdAt,
       updatedAt: dbUser.updatedAt
+    };
+  }
+
+  private tokenPayload(user: User) {
+    return {
+      userId: user.id,
+      email: user.email,
+      subscriptionTier: user.subscriptionTier,
+      emailVerified: user.emailVerified
     };
   }
   /**
    * Register a new user with email and password
    * Requirements: 1.1, 9.1
    */
-  async register(email: string, password: string): Promise<{ user: User; token: string }> {
+  async register(email: string, password: string): Promise<{ user: User }> {
     try {
-      // Validate input
       if (!email || !password) {
         throw new ValidationError('Email and password are required');
       }
 
-      // Validate email format
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
         throw new ValidationError('Invalid email format');
       }
 
-      // Validate password strength
       validatePassword(password);
 
-      // Check if user already exists
+      const normalizedEmail = email.toLowerCase();
+
       const existingUser = await this.prisma.user.findUnique({
-        where: { email: email.toLowerCase() }
+        where: { email: normalizedEmail }
       });
 
       if (existingUser) {
         throw new ValidationError('User with this email already exists');
       }
 
-      // Hash password with bcrypt (minimum 12 salt rounds)
+      const emailConfigured = this.emailService?.isConfigured() === true;
+      if (!emailConfigured && process.env.NODE_ENV !== 'test') {
+        throw new ValidationError(
+          'Email verification is not configured. Set RESEND_API_KEY and EMAIL_FROM_ADDRESS.'
+        );
+      }
+
       const passwordHash = await hashPassword(password);
 
-      // Use a transaction to ensure atomicity - if anything fails, rollback everything
-      const result = await this.prisma.$transaction(async (tx) => {
-        // Create user with default free subscription tier
-        const dbUser = await tx.user.create({
+      const dbUser = await this.prisma.$transaction(async (tx) => {
+        const userRow = await tx.user.create({
           data: {
-            email: email.toLowerCase(),
+            email: normalizedEmail,
             passwordHash,
-            subscriptionTier: SubscriptionTier.FREE
+            subscriptionTier: SubscriptionTier.FREE,
+            emailVerified: false
           }
         });
 
-        // Convert database user to application user type
-        const user = this.dbUserToUser(dbUser);
-
-        // Generate JWT token (if this fails, the transaction will rollback)
-        const token = generateToken({
-          userId: user.id,
-          email: user.email,
-          subscriptionTier: user.subscriptionTier
-        });
-
-        // Create default user profile
         await tx.userProfile.create({
           data: {
-            userId: user.id,
+            userId: userRow.id,
             aiAttributes: {},
             extractedSkills: []
           }
         });
 
-        return { user, token };
+        return userRow;
       });
 
-      return result;
+      if (!emailConfigured) {
+        return { user: this.dbUserToUser(dbUser) };
+      }
+
+      const otp = this.generateOTP();
+      const otpHash = await bcrypt.hash(otp, 10);
+      const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+      try {
+        await this.prisma.emailVerificationOTP.create({
+          data: {
+            email: normalizedEmail,
+            otpHash,
+            expiresAt
+          }
+        });
+        await this.emailService!.sendEmailVerificationOTP(normalizedEmail, otp);
+      } catch (sendErr) {
+        await this.prisma.emailVerificationOTP.deleteMany({ where: { email: normalizedEmail } });
+        await this.prisma.user.delete({ where: { id: dbUser.id } }).catch(() => {});
+        console.error('Registration email send failed:', sendErr);
+        throw new ExternalServiceError('Could not send verification email. Please try again later.', {
+          cause: (sendErr as Error).message
+        });
+      }
+
+      return { user: this.dbUserToUser(dbUser) };
     } catch (error) {
-      if (error instanceof ValidationError || error instanceof AuthenticationError) {
+      if (
+        error instanceof ValidationError ||
+        error instanceof AuthenticationError ||
+        error instanceof ExternalServiceError
+      ) {
         throw error;
       }
-      // Log the actual error for debugging
       console.error('Registration error:', error);
-      throw new AuthenticationError('Registration failed', { 
+      throw new AuthenticationError('Registration failed', {
         error: (error as Error).message,
-        stack: (error as Error).stack 
+        stack: (error as Error).stack
       });
     }
+  }
+
+  /**
+   * Verify signup OTP and issue session JWT.
+   */
+  async verifyEmail(email: string, otp: string): Promise<{ user: User; token: string }> {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    });
+
+    if (!user || user.authProvider !== 'local') {
+      throw new AuthenticationError('Invalid or expired verification code');
+    }
+
+    if (user.emailVerified) {
+      const u = this.dbUserToUser(user);
+      return { user: u, token: generateToken(this.tokenPayload(u)) };
+    }
+
+    const records = await this.prisma.emailVerificationOTP.findMany({
+      where: { email: normalizedEmail },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    let matched = false;
+    for (const record of records) {
+      if (new Date() > record.expiresAt) continue;
+      const isValid = await verifyPassword(otp, record.otpHash);
+      if (isValid) {
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      throw new AuthenticationError('Invalid or expired verification code');
+    }
+
+    await this.prisma.emailVerificationOTP.deleteMany({
+      where: { email: normalizedEmail }
+    });
+
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerified: true }
+    });
+
+    const appUser = this.dbUserToUser(updated);
+    return {
+      user: appUser,
+      token: generateToken(this.tokenPayload(appUser))
+    };
+  }
+
+  /**
+   * Resend signup verification OTP (no enumeration — same response pattern as password reset where possible).
+   */
+  async resendVerificationEmail(email: string): Promise<void> {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    });
+
+    if (!user || user.authProvider !== 'local' || user.emailVerified) {
+      return;
+    }
+
+    if (!this.emailService?.isConfigured()) {
+      throw new ValidationError(
+        'Email service is not configured. Please contact support.'
+      );
+    }
+
+    const otp = this.generateOTP();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+    await this.prisma.emailVerificationOTP.create({
+      data: {
+        email: normalizedEmail,
+        otpHash,
+        expiresAt
+      }
+    });
+
+    await this.emailService.sendEmailVerificationOTP(normalizedEmail, otp);
   }
 
   /**
@@ -148,18 +281,23 @@ export class AuthService implements IAuthService {
         throw new AuthenticationError('Invalid credentials');
       }
 
+      if (!dbUser.emailVerified) {
+        throw new EmailNotVerifiedError('Please verify your email before signing in.', {
+          email: dbUser.email
+        });
+      }
+
       const user = this.dbUserToUser(dbUser);
 
-      // Generate JWT token
-      const token = generateToken({
-        userId: user.id,
-        email: user.email,
-        subscriptionTier: user.subscriptionTier
-      });
+      const token = generateToken(this.tokenPayload(user));
 
       return { user, token };
     } catch (error) {
-      if (error instanceof ValidationError || error instanceof AuthenticationError) {
+      if (
+        error instanceof ValidationError ||
+        error instanceof AuthenticationError ||
+        error instanceof EmailNotVerifiedError
+      ) {
         throw error;
       }
       throw new AuthenticationError('Login failed', { error: (error as Error).message });
@@ -235,11 +373,7 @@ export class AuthService implements IAuthService {
       const user = await this.validateToken(token);
 
       // Generate new token with same payload
-      const newToken = generateToken({
-        userId: user.id,
-        email: user.email,
-        subscriptionTier: user.subscriptionTier
-      });
+      const newToken = generateToken(this.tokenPayload(user));
 
       return newToken;
     } catch (error) {
@@ -326,12 +460,12 @@ export class AuthService implements IAuthService {
           'An account with this email already exists. Please sign in with your password.'
         );
       }
-      const user = this.dbUserToUser(existingUser);
-      const token = generateToken({
-        userId: user.id,
-        email: user.email,
-        subscriptionTier: user.subscriptionTier
+      const synced = await this.prisma.user.update({
+        where: { id: existingUser.id },
+        data: { emailVerified: true }
       });
+      const user = this.dbUserToUser(synced);
+      const token = generateToken(this.tokenPayload(user));
       return { user, token };
     }
 
@@ -342,7 +476,8 @@ export class AuthService implements IAuthService {
           passwordHash: null,
           authProvider: 'google',
           googleId,
-          subscriptionTier: SubscriptionTier.FREE
+          subscriptionTier: SubscriptionTier.FREE,
+          emailVerified: true
         }
       });
 
@@ -355,11 +490,7 @@ export class AuthService implements IAuthService {
       });
 
       const user = this.dbUserToUser(dbUser);
-      const token = generateToken({
-        userId: user.id,
-        email: user.email,
-        subscriptionTier: user.subscriptionTier
-      });
+      const token = generateToken(this.tokenPayload(user));
       return { user, token };
     });
 
@@ -492,10 +623,9 @@ export class AuthService implements IAuthService {
   }
 
   /**
-   * Change email for authenticated user (current password required for verification).
-   * Profile settings: edit email.
+   * Start email change: set pending email and send OTP to the new address (password re-check).
    */
-  async changeEmail(userId: string, newEmail: string, password: string): Promise<User> {
+  async requestEmailChange(userId: string, newEmail: string, password: string): Promise<User> {
     const normalizedNewEmail = newEmail.toLowerCase().trim();
 
     if (!normalizedNewEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedNewEmail)) {
@@ -519,23 +649,180 @@ export class AuthService implements IAuthService {
       throw new AuthenticationError('Password is incorrect');
     }
 
-    const existing = await this.prisma.user.findUnique({
-      where: { email: normalizedNewEmail }
+    const conflict = await this.prisma.user.findFirst({
+      where: {
+        AND: [
+          { id: { not: userId } },
+          {
+            OR: [{ email: normalizedNewEmail }, { pendingEmail: normalizedNewEmail }]
+          }
+        ]
+      }
     });
-    if (existing && existing.id !== userId) {
+    if (conflict) {
       throw new ValidationError('An account with this email already exists');
     }
 
     if (normalizedNewEmail === dbUser.email.toLowerCase()) {
-      return this.dbUserToUser(dbUser);
+      const cleared = await this.prisma.user.update({
+        where: { id: userId },
+        data: { pendingEmail: null }
+      });
+      await this.prisma.emailVerificationOTP.deleteMany({ where: { email: normalizedNewEmail } });
+      return this.dbUserToUser(cleared);
     }
+
+    if (!this.emailService?.isConfigured()) {
+      if (process.env.NODE_ENV === 'test') {
+        const updated = await this.prisma.user.update({
+          where: { id: userId },
+          data: { pendingEmail: normalizedNewEmail }
+        });
+        return this.dbUserToUser(updated);
+      }
+      throw new ValidationError(
+        'Email service is not configured. Set RESEND_API_KEY and EMAIL_FROM_ADDRESS.'
+      );
+    }
+
+    const otp = this.generateOTP();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+    await this.prisma.emailVerificationOTP.deleteMany({
+      where: { email: normalizedNewEmail }
+    });
+    await this.prisma.emailVerificationOTP.create({
+      data: {
+        email: normalizedNewEmail,
+        otpHash,
+        expiresAt
+      }
+    });
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { email: normalizedNewEmail }
+      data: { pendingEmail: normalizedNewEmail }
     });
 
+    try {
+      await this.emailService.sendEmailChangeConfirmationOTP(normalizedNewEmail, otp);
+    } catch (sendErr) {
+      await this.prisma.emailVerificationOTP.deleteMany({
+        where: { email: normalizedNewEmail }
+      });
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { pendingEmail: null }
+      });
+      console.error('Email change OTP send failed:', sendErr);
+      throw new ExternalServiceError('Could not send verification email. Please try again later.', {
+        cause: (sendErr as Error).message
+      });
+    }
+
     return this.dbUserToUser(updated);
+  }
+
+  /**
+   * Confirm pending email with OTP; issues a new session JWT.
+   */
+  async confirmEmailChange(
+    userId: string,
+    otp: string
+  ): Promise<{ user: User; token: string }> {
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!dbUser) {
+      throw new AuthenticationError('User not found');
+    }
+
+    if (!dbUser.pendingEmail) {
+      throw new ValidationError('No pending email change. Request a new code first.');
+    }
+
+    const pending = dbUser.pendingEmail.toLowerCase();
+
+    const records = await this.prisma.emailVerificationOTP.findMany({
+      where: { email: pending },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    let matched = false;
+    for (const record of records) {
+      if (new Date() > record.expiresAt) continue;
+      const ok = await verifyPassword(otp, record.otpHash);
+      if (ok) {
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      throw new AuthenticationError('Invalid or expired verification code');
+    }
+
+    await this.prisma.emailVerificationOTP.deleteMany({
+      where: { email: pending }
+    });
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        email: pending,
+        pendingEmail: null,
+        emailVerified: true
+      }
+    });
+
+    const appUser = this.dbUserToUser(updated);
+    return {
+      user: appUser,
+      token: generateToken(this.tokenPayload(appUser))
+    };
+  }
+
+  /**
+   * Resend OTP for the current pending email change.
+   */
+  async resendEmailChangeOtp(userId: string): Promise<void> {
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!dbUser) {
+      throw new AuthenticationError('User not found');
+    }
+
+    if (!dbUser.pendingEmail) {
+      throw new ValidationError('No pending email change to resend.');
+    }
+
+    if (!this.emailService?.isConfigured()) {
+      throw new ValidationError(
+        'Email service is not configured. Please contact support.'
+      );
+    }
+
+    const pending = dbUser.pendingEmail.toLowerCase();
+    const otp = this.generateOTP();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+    await this.prisma.emailVerificationOTP.deleteMany({
+      where: { email: pending }
+    });
+    await this.prisma.emailVerificationOTP.create({
+      data: {
+        email: pending,
+        otpHash,
+        expiresAt
+      }
+    });
+
+    await this.emailService.sendEmailChangeConfirmationOTP(pending, otp);
   }
 
   private generateOTP(): string {

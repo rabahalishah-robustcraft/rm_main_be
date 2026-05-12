@@ -4,7 +4,8 @@ describe('JWT Utils Simple', () => {
   const mockPayload = {
     userId: 'test-user-id',
     email: 'test@example.com',
-    subscriptionTier: 'free'
+    subscriptionTier: 'free',
+    emailVerified: true
   };
 
   beforeEach(() => {

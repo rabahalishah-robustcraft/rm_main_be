@@ -1,11 +1,12 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
 import { ServiceContainer } from '../container';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { authenticate, requireEmailVerified, AuthenticatedRequest } from '../middleware/auth';
 import { enforceDataIsolation } from '../middleware/security';
-import { aiProcessingRateLimit, uploadRateLimit } from '../middleware/rateLimiting';
+import { aiProcessingRateLimit } from '../middleware/rateLimiting';
 import { validateRequest, validationSchemas } from '../middleware/validation';
 import { AudioSessionError } from '../services/AudioSessionService';
+import { SubscriptionError } from '../services/SubscriptionService';
 import { config } from '../utils/config';
 import { formatSessionDisplayName } from '../utils/sessionDisplayName';
 
@@ -16,7 +17,10 @@ import { formatSessionDisplayName } from '../utils/sessionDisplayName';
 
 export function createSessionRoutes(services: ServiceContainer): Router {
   const router = Router();
-  const { audioSessionService } = services;
+  const { audioSessionService, subscriptionService } = services;
+
+  router.use(authenticate);
+  router.use(requireEmailVerified);
 
 // Configure multer for audio file uploads
 const upload = multer({
@@ -39,11 +43,11 @@ const upload = multer({
  * POST /api/sessions/start
  * Requirements: 3.1, 6.2, 6.3
  */
-router.post('/start', authenticate, aiProcessingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/start', aiProcessingRateLimit, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.id;
 
-    // Create new session (includes usage limit validation)
+    // Create new interview session (monthly interview cap for free tier)
     const session = await audioSessionService.startSession(userId);
 
     res.status(201).json({
@@ -62,7 +66,10 @@ router.post('/start', authenticate, aiProcessingRateLimit, async (req: Authentic
       // Handle specific error codes
       if (error.code === 'USER_NOT_FOUND') {
         statusCode = 404;
-      } else if (error.code === 'USAGE_LIMIT_EXCEEDED') {
+      } else if (
+        error.code === 'USAGE_LIMIT_EXCEEDED' ||
+        error.code === 'INTERVIEW_SESSION_LIMIT_EXCEEDED'
+      ) {
         statusCode = 429;
       }
       
@@ -95,10 +102,8 @@ router.post('/start', authenticate, aiProcessingRateLimit, async (req: Authentic
  * Requirements: 3.2
  */
 router.post('/:id/audio', 
-  authenticate, 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.sessionId),
-  uploadRateLimit, 
   upload.single('audio'), 
   async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -141,30 +146,44 @@ router.post('/:id/audio',
       });
     }
 
-    // Upload audio and start processing
-    await audioSessionService.uploadAudio(sessionId, audioFile.buffer, audioFile.originalname);
+    const uploadResult = await audioSessionService.uploadAudio(
+      sessionId,
+      audioFile.buffer,
+      audioFile.originalname,
+      audioFile.mimetype || 'audio/wav'
+    );
 
     res.status(200).json({
       success: true,
       message: 'Audio uploaded successfully. Processing started.',
       data: {
-        sessionId,
-        status: 'processing'
+        id: uploadResult.id,
+        status: uploadResult.status
       }
     });
     return;
   } catch (error) {
     if (error instanceof AudioSessionError) {
-      const statusCode = error.code === 'SESSION_NOT_FOUND' ? 404 : 
-                        error.code === 'INVALID_SESSION_STATE' ? 409 : 400;
-      return res.status(statusCode).json({
+      const statusCode =
+        error.code === 'SESSION_NOT_FOUND'
+          ? 404
+          : error.code === 'INVALID_SESSION_STATE'
+            ? 409
+            : error.code === 'ASSEMBLYAI_SUBMIT_FAILED'
+              ? 500
+              : 400;
+      const payload: Record<string, unknown> = {
         error: {
           code: error.code,
           message: error.message
         },
         timestamp: new Date().toISOString(),
         path: req.path
-      });
+      };
+      if (error.code === 'ASSEMBLYAI_SUBMIT_FAILED' && error.originalError?.message) {
+        (payload.error as Record<string, unknown>).upstream = error.originalError.message;
+      }
+      return res.status(statusCode).json(payload);
     }
 
     console.error('Audio upload error:', error);
@@ -181,16 +200,105 @@ router.post('/:id/audio',
 });
 
 /**
+ * Pull transcript from AssemblyAI (recover when webhook URL was wrong or callback failed).
+ * POST /api/sessions/:id/assembly-sync
+ */
+router.post(
+  '/:id/assembly-sync',
+  enforceDataIsolation('session'),
+  validateRequest(validationSchemas.sessions.sessionId),
+  aiProcessingRateLimit,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const sessionId = req.params.id;
+      const userId = req.user!.id;
+
+      const session = await audioSessionService.syncTranscriptFromAssembly(sessionId, userId);
+
+      const hasAnalysis = session.status === 'completed' && session.aiAnalysis != null;
+
+      res.status(200).json({
+        success: true,
+        message:
+          session.status === 'awaiting_review'
+            ? 'Transcript synced from AssemblyAI'
+            : session.status === 'failed'
+              ? 'AssemblyAI reported an error for this job'
+              : 'Session updated',
+        data: {
+          id: session.id,
+          displayName: session.displayName ?? null,
+          status: session.status,
+          compactTranscript: session.compactTranscript,
+          editedTranscript: session.editedTranscript,
+          transcript: session.transcript,
+          aiAnalysis: session.aiAnalysis,
+          scores: hasAnalysis
+            ? {
+                overall: session.overallScore,
+                clarity: session.clarityScore,
+                confidence: session.confidenceScore,
+                specificity: session.specificityScore,
+                tone: session.toneScore,
+                enthusiasm: session.enthusiasmScore
+              }
+            : null,
+          analysisComplete: session.analysisComplete,
+          processingError: session.processingError,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt
+        }
+      });
+      return;
+    } catch (error) {
+      if (error instanceof AudioSessionError) {
+        const statusCode =
+          error.code === 'SESSION_NOT_FOUND'
+            ? 404
+            : error.code === 'SESSION_ACCESS_DENIED'
+              ? 403
+              : error.code === 'TRANSCRIPT_NOT_READY'
+                ? 409
+                : error.code === 'INVALID_SESSION_STATE' || error.code === 'ASSEMBLY_JOB_MISSING'
+                  ? 409
+                  : error.code === 'ASSEMBLYAI_NOT_CONFIGURED'
+                    ? 503
+                    : 400;
+        return res.status(statusCode).json({
+          error: {
+            code: error.code,
+            message: error.message
+          },
+          timestamp: new Date().toISOString(),
+          path: req.path
+        });
+      }
+
+      console.error('Assembly sync error:', error);
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to sync transcript from AssemblyAI'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+      return;
+    }
+  }
+);
+
+/**
  * Get user's session history
  * GET /api/sessions/history
  * Requirements: 5.3
  * 
  * Query params:
  * - limit: number of sessions to return (1-100, default 20)
- * - status: filter by status - 'completed', 'processing', 'failed', 'pending', 'all' (default: 'completed')
+ * - status: filter by status - 'completed', 'processing', 'failed', 'pending', 'transcribing', 'awaiting_review', 'analyzing', 'all' (default: 'completed')
+ * - sessionType: 'interview' | 'practice' | 'all' (default: 'all')
  */
 router.get('/history', 
-  authenticate, 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.history),
   async (req: AuthenticatedRequest, res: Response) => {
@@ -198,6 +306,7 @@ router.get('/history',
     const userId = req.user!.id;
     const limit = parseInt(req.query.limit as string) || 20;
     const statusFilter = (req.query.status as string) || 'completed';
+    const sessionTypeRaw = (req.query.sessionType as string) || 'all';
 
     if (limit < 1 || limit > 100) {
       return res.status(400).json({
@@ -211,7 +320,16 @@ router.get('/history',
     }
 
     // Validate status filter
-    const validStatuses = ['completed', 'processing', 'failed', 'pending', 'all'];
+    const validStatuses = [
+      'completed',
+      'processing',
+      'failed',
+      'pending',
+      'transcribing',
+      'awaiting_review',
+      'analyzing',
+      'all'
+    ];
     if (!validStatuses.includes(statusFilter)) {
       return res.status(400).json({
         error: {
@@ -223,13 +341,34 @@ router.get('/history',
       });
     }
 
-    const sessions = await audioSessionService.getSessionHistory(userId, limit, statusFilter);
+    const validSessionTypes = ['interview', 'practice', 'all'];
+    if (!validSessionTypes.includes(sessionTypeRaw)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_SESSION_TYPE',
+          message: `sessionType must be one of: ${validSessionTypes.join(', ')}`
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+    }
+
+    const sessionTypeFilter = sessionTypeRaw as 'interview' | 'practice' | 'all';
+
+    const sessions = await audioSessionService.getSessionHistory(
+      userId,
+      limit,
+      statusFilter,
+      sessionTypeFilter
+    );
 
     const formattedSessions = sessions.map(session => ({
       id: session.id,
       displayName: session.displayName ?? formatSessionDisplayName(session.createdAt),
+      sessionType: session.sessionType,
       status: session.status,
       scores: {
+        overall: session.overallScore,
         clarity: session.clarityScore,
         confidence: session.confidenceScore,
         tone: session.toneScore,
@@ -245,7 +384,7 @@ router.get('/history',
       data: {
         sessions: formattedSessions,
         total: sessions.length,
-        filter: statusFilter
+        filter: { status: statusFilter, sessionType: sessionTypeFilter }
       }
     });
     return;
@@ -280,7 +419,6 @@ router.get('/history',
  * Body: { transcript: string }
  */
 router.patch('/:id/transcript',
-  authenticate,
   enforceDataIsolation('session'),
   validateRequest(validationSchemas.sessions.updateTranscript),
   aiProcessingRateLimit,
@@ -294,18 +432,18 @@ router.patch('/:id/transcript',
 
     res.status(200).json({
       success: true,
-      message: 'Transcript updated and analysis completed',
+      message: 'Analysis complete.',
       data: {
         id: session.id,
         status: session.status,
-        transcript: session.transcript,
         aiAnalysis: session.aiAnalysis,
         scores: {
+          overall: session.overallScore,
           clarity: session.clarityScore,
           confidence: session.confidenceScore,
+          specificity: session.specificityScore,
           tone: session.toneScore,
-          enthusiasm: session.enthusiasmScore,
-          specificity: session.specificityScore
+          enthusiasm: session.enthusiasmScore
         },
         updatedAt: session.updatedAt
       }
@@ -313,16 +451,26 @@ router.patch('/:id/transcript',
     return;
   } catch (error) {
     if (error instanceof AudioSessionError) {
-      const statusCode = error.code === 'SESSION_NOT_FOUND' ? 404 :
-                        error.code === 'SESSION_ACCESS_DENIED' ? 403 : 400;
-      return res.status(statusCode).json({
+      const statusCode =
+        error.code === 'SESSION_NOT_FOUND'
+          ? 404
+          : error.code === 'SESSION_ACCESS_DENIED'
+            ? 403
+            : error.code === 'ANALYSIS_FAILED'
+              ? 500
+              : 400;
+      const payload: Record<string, unknown> = {
         error: {
           code: error.code,
           message: error.message
         },
         timestamp: new Date().toISOString(),
         path: req.path
-      });
+      };
+      if (error.code === 'ANALYSIS_FAILED' && error.originalError?.message) {
+        (payload.error as Record<string, unknown>).upstream = error.originalError.message;
+      }
+      return res.status(statusCode).json(payload);
     }
     console.error('Transcript update error:', error);
     res.status(500).json({
@@ -343,7 +491,6 @@ router.patch('/:id/transcript',
  * Body: { displayName?: string }
  */
 router.patch('/:id',
-  authenticate,
   enforceDataIsolation('session'),
   validateRequest(validationSchemas.sessions.updateDisplayName),
   async (req: AuthenticatedRequest, res: Response) => {
@@ -400,7 +547,6 @@ router.patch('/:id',
  * Requirements: 3.1
  */
 router.get('/:id', 
-  authenticate, 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.sessionId),
   async (req: AuthenticatedRequest, res: Response) => {
@@ -432,28 +578,62 @@ router.get('/:id',
       });
     }
 
-    res.status(200).json({
-      success: true,
-      data: {
-        id: session.id,
-        displayName: session.displayName ?? null,
-        status: session.status,
-        transcript: session.transcript,
-        aiAnalysis: session.aiAnalysis,
-        scores: {
-          clarity: session.clarityScore,
-          confidence: session.confidenceScore,
-          tone: session.toneScore,
-          enthusiasm: session.enthusiasmScore,
-          specificity: session.specificityScore
-        },
-        analysisComplete: session.analysisComplete,
-        processingError: session.processingError,
-        createdAt: session.createdAt,
-        updatedAt: session.updatedAt
+    const hasAnalysis = session.status === 'completed' && session.aiAnalysis != null;
+
+    const data: Record<string, unknown> = {
+      id: session.id,
+      sessionType: session.sessionType,
+      displayName: session.displayName ?? null,
+      status: session.status,
+      compactTranscript: session.compactTranscript,
+      editedTranscript: session.editedTranscript,
+      transcript: session.transcript,
+      aiAnalysis: session.aiAnalysis,
+      scores: hasAnalysis
+        ? {
+            overall: session.overallScore,
+            clarity: session.clarityScore,
+            confidence: session.confidenceScore,
+            specificity: session.specificityScore,
+            tone: session.toneScore,
+            enthusiasm: session.enthusiasmScore
+          }
+        : null,
+      analysisComplete: session.analysisComplete,
+      processingError: session.processingError,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt
+    };
+
+    if (session.sessionType === 'interview') {
+      try {
+        const limits = await subscriptionService.getInterviewPlanLimits(userId);
+        data.limits = {
+          tier: limits.tier,
+          maxInterviewAudioSeconds: limits.maxInterviewAudioSeconds,
+          interviewSessionsLimit: limits.interviewSessionsLimit,
+          interviewSessionsUsedThisMonth: limits.interviewSessionsUsedThisMonth,
+          interviewSessionsRemaining: limits.interviewSessionsRemaining
+        };
+      } catch (limitErr) {
+        if (limitErr instanceof SubscriptionError) {
+          return res.status(500).json({
+            error: {
+              code: 'INTERVIEW_LIMITS_UNAVAILABLE',
+              message: limitErr.message
+            },
+            timestamp: new Date().toISOString(),
+            path: req.path
+          });
+        }
+        throw limitErr;
       }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data
     });
-    return;
   } catch (error) {
     if (error instanceof AudioSessionError) {
       return res.status(400).json({
@@ -488,7 +668,6 @@ router.get('/:id',
  * Returns a presigned URL valid for 1 hour for audio playback
  */
 router.get('/:id/audio-url', 
-  authenticate, 
   enforceDataIsolation('session'), 
   validateRequest(validationSchemas.sessions.sessionId),
   async (req: AuthenticatedRequest, res: Response) => {

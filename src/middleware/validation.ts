@@ -124,6 +124,23 @@ export const validationSchemas = {
         })
       })
     },
+    verifyEmail: {
+      body: Joi.object({
+        email: Joi.string().email().required(),
+        otp: Joi.string().length(6).pattern(/^\d+$/).required().messages({
+          'string.length': 'OTP must be 6 digits',
+          'string.pattern.base': 'OTP must contain only numbers'
+        })
+      })
+    },
+    resendVerification: {
+      body: Joi.object({
+        email: Joi.string().email().required().messages({
+          'string.email': 'Must be a valid email address',
+          'any.required': 'Email is required'
+        })
+      })
+    },
     resetPassword: {
       body: Joi.object({
         resetToken: Joi.string().required(),
@@ -146,7 +163,7 @@ export const validationSchemas = {
         })
       })
     },
-    changeEmail: {
+    changeEmailRequest: {
       body: Joi.object({
         newEmail: Joi.string().email().required().messages({
           'string.email': 'Must be a valid email address',
@@ -156,6 +173,17 @@ export const validationSchemas = {
           'any.required': 'Password is required to verify your identity'
         })
       })
+    },
+    changeEmailConfirm: {
+      body: Joi.object({
+        otp: Joi.string().length(6).pattern(/^\d+$/).required().messages({
+          'string.length': 'OTP must be 6 digits',
+          'string.pattern.base': 'OTP must contain only numbers'
+        })
+      })
+    },
+    changeEmailResend: {
+      body: Joi.object({})
     }
   },
 
@@ -200,10 +228,22 @@ export const validationSchemas = {
         })
       }),
       body: Joi.object({
-        transcript: Joi.string().min(1).max(50000).trim().required().messages({
-          'string.min': 'Transcript cannot be empty',
-          'any.required': 'Transcript is required'
-        })
+        transcript: Joi.array()
+          .items(
+            Joi.object({
+              id: Joi.number().integer().min(0).required(),
+              s: Joi.string().max(16).required(),
+              t: Joi.string().max(50000).allow('').required(),
+              start: Joi.number().required(),
+              end: Joi.number().required()
+            })
+          )
+          .min(1)
+          .required()
+          .messages({
+            'array.min': 'Transcript must contain at least one turn',
+            'any.required': 'Transcript is required'
+          })
       })
     },
     updateDisplayName: {
@@ -221,16 +261,38 @@ export const validationSchemas = {
       query: Joi.object({
         limit: Joi.number().integer().min(1).max(100).optional(),
         offset: Joi.number().integer().min(0).optional(),
-        status: Joi.string().valid('completed', 'processing', 'failed', 'pending', 'all').optional()
+        status: Joi.string()
+          .valid(
+            'completed',
+            'processing',
+            'failed',
+            'pending',
+            'transcribing',
+            'awaiting_review',
+            'analyzing',
+            'all'
+          )
+          .optional(),
+        sessionType: Joi.string().valid('interview', 'practice', 'all').optional()
       })
     }
   },
 
-  // Subscription endpoints
-  subscription: {
-    upgrade: {
+  // Practice endpoints
+  practice: {
+    updateAnswer: {
+      params: Joi.object({
+        id: Joi.string().pattern(/^c[a-z0-9]{24}$/).required().messages({
+          'string.pattern.base': 'Session ID must be a valid CUID',
+          'any.required': 'Session ID is required'
+        })
+      }),
       body: Joi.object({
-        tier: Joi.string().valid('FREE', 'PAID').required()
+        transcript: Joi.string().trim().min(10).max(50000).required().messages({
+          'string.min': 'Transcript must be at least 10 characters',
+          'string.max': 'Transcript is too long',
+          'any.required': 'transcript is required'
+        })
       })
     }
   },

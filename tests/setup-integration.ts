@@ -1,6 +1,10 @@
 // Integration test setup with real database
 import { PrismaClient } from '@prisma/client';
 
+// Session pipeline integration tests mock AssemblyAI but still read config at import time.
+process.env.ASSEMBLYAI_API_KEY ||= 'integration-test-assemblyai-api-key-placeholder';
+process.env.WEBHOOK_BASE_URL ||= 'https://example.com';
+
 // Integration tests use a real PostgreSQL database.
 // DATABASE_URL_TEST should point to a Postgres test database (see .env.test).
 const prisma = new PrismaClient({
@@ -11,21 +15,8 @@ const prisma = new PrismaClient({
   }
 });
 
-beforeEach(async () => {
-  // Clean PostgreSQL public schema before each test run (excluding Prisma migrations table)
-  const tables = await prisma.$queryRaw<Array<{ tablename: string }>>`
-    SELECT tablename
-    FROM pg_tables
-    WHERE schemaname = 'public'
-      AND tablename <> '_prisma_migrations';
-  `;
-
-  for (const { tablename } of tables) {
-    // Restart identity to reset sequences; cascade to handle FKs
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-    await prisma.$executeRawUnsafe(`TRUNCATE TABLE "${tablename}" RESTART IDENTITY CASCADE;`);
-  }
-});
+// Do not truncate the schema before every test: multi-step suites keep users/tokens across
+// `it` blocks, and the app uses the same DATABASE_URL. Suites should clean up in afterAll/afterEach.
 
 afterAll(async () => {
   await prisma.$disconnect();

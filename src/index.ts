@@ -1,3 +1,4 @@
+import './types/express-augment';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -18,11 +19,11 @@ import {
   performanceMonitor, 
   securityHeaders, 
   sanitizeRequest,
-  requestTimeout,
+  requestTimeoutWithLongAiRoutes,
   healthCheck 
 } from './middleware/logging';
 import { 
-  apiRateLimit, 
+  apiRateLimitExcludingWebhooks, 
   abuseDetection 
 } from './middleware/rateLimiting';
 import { 
@@ -38,7 +39,7 @@ dotenv.config();
 
 // Create the Express app with all middleware and routes (without listening)
 async function createApp() {
-  console.log('🚀 AI Audio Summarization Backend starting...');
+  console.log('Recruit Me AI Backend starting...');
 
   const validation = await runStartupValidation();
 
@@ -90,8 +91,10 @@ async function createApp() {
     app.use(performanceMonitor);
   }
 
-  // Request timeout
-  app.use(requestTimeout(30000)); // 30 second timeout
+  // Request timeout: default 30s; PATCH .../transcript 2m; POST .../audio uses AUDIO_UPLOAD_REQUEST_TIMEOUT_MS
+  app.use(
+    requestTimeoutWithLongAiRoutes(30000, 120000, config.AUDIO_UPLOAD_REQUEST_TIMEOUT_MS)
+  );
 
   // Request validation and sanitization
   app.use(validateRequest);
@@ -100,17 +103,40 @@ async function createApp() {
   // API key validation (optional)
   app.use(validateApiKey);
 
-  // Rate limiting (if enabled)
+  // Rate limiting (if enabled) — skip /api/webhooks (AssemblyAI server callbacks)
   if (config.ENABLE_RATE_LIMITING) {
-    app.use('/api', apiRateLimit);
+    app.use('/api', apiRateLimitExcludingWebhooks);
   }
 
-  // Abuse detection (if enabled)
-  if (config.ENABLE_ABUSE_DETECTION) {
-    app.use(abuseDetection);
-  }
+  const rawJsonWebhookParser = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const buf = req.body as Buffer;
+    if (Buffer.isBuffer(buf)) {
+      req.rawBody = buf;
+      try {
+        req.body = buf.length ? JSON.parse(buf.toString('utf8')) : {};
+      } catch {
+        req.body = {};
+      }
+    } else {
+      req.rawBody = Buffer.alloc(0);
+      req.body = req.body ?? {};
+    }
+    next();
+  };
 
-  // Body parsing middleware
+  // Raw JSON body for AssemblyAI + Stripe webhooks (must run before express.json)
+  app.use(
+    '/api/webhooks/assemblyai',
+    express.raw({ type: 'application/json', limit: '2mb' }),
+    rawJsonWebhookParser
+  );
+  app.use(
+    '/api/webhooks/stripe',
+    express.raw({ type: 'application/json', limit: '2mb' }),
+    rawJsonWebhookParser
+  );
+
+  // Body parsing middleware (must run before abuse detection so body/query strings are inspectable)
   app.use(express.json({
     limit: `${Math.floor(config.MAX_FILE_SIZE / (1024 * 1024))}mb`
   }));
@@ -119,13 +145,18 @@ async function createApp() {
     limit: `${Math.floor(config.MAX_FILE_SIZE / (1024 * 1024))}mb`
   }));
 
+  // Abuse detection (if enabled) — after parsers; see abuseDetection implementation
+  if (config.ENABLE_ABUSE_DETECTION) {
+    app.use(abuseDetection);
+  }
+
   // Session security for authenticated requests
   app.use(sessionSecurity);
 
   // Health check endpoint (before other routes)
   app.use(healthCheck);
 
-  // API routes with dependency injection
+  // API routes with dependency injection (single mount: all routes under /api only)
   const apiRoutes = createApiRoutes(services);
   app.use('/api', apiRoutes);
 
@@ -183,9 +214,12 @@ async function startServer() {
     process.exit(1);
   });
 
-  // Start server
-  app.listen(PORT, () => {
-    console.log(`✅ Server running on port ${PORT}`);
+  // Bind all interfaces so tools like ngrok (forwarding to localhost:PORT) can reach the process.
+  // If you see ngrok ERR_NGROK_8012 / 502, confirm this PORT matches `ngrok http <PORT>` and the app is running.
+  const LISTEN_HOST = process.env.LISTEN_HOST || '0.0.0.0';
+
+  app.listen(PORT, LISTEN_HOST, () => {
+    console.log(`✅ Server listening on http://${LISTEN_HOST}:${PORT}`);
     console.log(`🌍 Environment: ${config.NODE_ENV}`);
     console.log(`📊 Monitoring: Active`);
     console.log(`🔒 Security: Enhanced`);

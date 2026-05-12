@@ -51,14 +51,57 @@ export function createAuthRoutes(services: ServiceContainer): Router {
       const { email, password }: RegisterRequest = req.body;
 
       const result = await authService.register(email, password);
-      
+
       res.status(201).json({
         success: true,
-        message: 'User registered successfully',
+        message: 'Account created. Check your email for a verification code.',
+        data: {
+          user: toSafeUser(result.user)
+        }
+      });
+    })
+  );
+
+  /**
+   * Verify email with OTP (local signup). Returns session JWT.
+   * POST /api/auth/verify-email
+   */
+  router.post(
+    '/verify-email',
+    passwordResetRateLimit,
+    validateRequest(validationSchemas.auth.verifyEmail),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { email, otp } = req.body;
+
+      const result = await authService.verifyEmail(email, otp);
+
+      res.status(200).json({
+        success: true,
+        message: 'Email verified successfully',
         data: {
           user: toSafeUser(result.user),
           token: result.token
         }
+      });
+    })
+  );
+
+  /**
+   * Resend signup verification OTP
+   * POST /api/auth/resend-verification
+   */
+  router.post(
+    '/resend-verification',
+    passwordResetRateLimit,
+    validateRequest(validationSchemas.auth.resendVerification),
+    asyncHandler(async (req: Request, res: Response) => {
+      const { email } = req.body;
+
+      await authService.resendVerificationEmail(email);
+
+      res.status(200).json({
+        success: true,
+        message: 'If an account exists and needs verification, you will receive an email.'
       });
     })
   );
@@ -132,6 +175,9 @@ export function createAuthRoutes(services: ServiceContainer): Router {
         id: user.id,
         email: user.email,
         subscriptionTier: user.subscriptionTier,
+        emailVerified: user.emailVerified,
+        pendingEmail: user.pendingEmail ?? null,
+        onboardingCompletedAt: user.onboardingCompletedAt,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
       });
@@ -264,23 +310,70 @@ export function createAuthRoutes(services: ServiceContainer): Router {
   );
 
   /**
-   * Change email (authenticated user). Profile settings: edit email.
-   * POST /api/auth/change-email
+   * Request email change: sends OTP to the new address (password required).
+   * POST /api/auth/change-email/request
    */
-  router.post('/change-email',
+  router.post('/change-email/request',
     authenticate,
     authRateLimit,
-    validateRequest(validationSchemas.auth.changeEmail),
+    validateRequest(validationSchemas.auth.changeEmailRequest),
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
       const userId = req.user!.id;
       const { newEmail, password } = req.body;
 
-      const user = await authService.changeEmail(userId, newEmail, password);
-      
+      const user = await authService.requestEmailChange(userId, newEmail, password);
+
+      res.status(200).json({
+        success: true,
+        message: user.pendingEmail
+          ? 'Check your new email for a confirmation code.'
+          : 'Email unchanged; any pending change was cleared.',
+        user: toSafeUser(user)
+      });
+    })
+  );
+
+  /**
+   * Confirm email change with OTP; returns new JWT.
+   * POST /api/auth/change-email/confirm
+   */
+  router.post('/change-email/confirm',
+    authenticate,
+    passwordResetRateLimit,
+    validateRequest(validationSchemas.auth.changeEmailConfirm),
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const userId = req.user!.id;
+      const { otp } = req.body;
+
+      const { user, token } = await authService.confirmEmailChange(userId, otp);
+
       res.status(200).json({
         success: true,
         message: 'Email updated successfully',
-        user: toSafeUser(user)
+        data: {
+          user: toSafeUser(user),
+          token
+        }
+      });
+    })
+  );
+
+  /**
+   * Resend OTP for pending email change.
+   * POST /api/auth/change-email/resend
+   */
+  router.post('/change-email/resend',
+    authenticate,
+    passwordResetRateLimit,
+    validateRequest(validationSchemas.auth.changeEmailResend),
+    asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+      const userId = req.user!.id;
+
+      await authService.resendEmailChangeOtp(userId);
+
+      res.status(200).json({
+        success: true,
+        message: 'If you have a pending email change, a new code was sent.'
       });
     })
   );
@@ -299,7 +392,9 @@ export function createAuthRoutes(services: ServiceContainer): Router {
         user: {
           id: req.user!.id,
           email: req.user!.email,
-          subscriptionTier: req.user!.subscriptionTier
+          subscriptionTier: req.user!.subscriptionTier,
+          emailVerified: req.user!.emailVerified,
+          pendingEmail: req.user!.pendingEmail ?? null
         }
       });
     })

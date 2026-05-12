@@ -1,5 +1,11 @@
 import { AuthService } from '@/services/AuthService';
-import { SubscriptionTier, AuthenticationError, ValidationError } from '@/types/auth';
+import {
+  SubscriptionTier,
+  AuthenticationError,
+  ValidationError,
+  EmailNotVerifiedError,
+  ExternalServiceError
+} from '@/types/auth';
 
 // Mock the dependencies
 jest.mock('@/utils/password', () => ({
@@ -16,23 +22,38 @@ jest.mock('@/utils/jwt', () => ({
 jest.mock('@/lib/prisma', () => {
   const mockUser = {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
   };
   const mockUserProfile = {
     create: jest.fn(),
+  };
+  const mockEmailVerificationOTP = {
+    create: jest.fn(),
+    deleteMany: jest.fn(),
+    findMany: jest.fn()
   };
   return {
     __esModule: true,
     default: {
       user: mockUser,
       userProfile: mockUserProfile,
+      emailVerificationOTP: mockEmailVerificationOTP,
       $transaction: jest.fn(async (fn: (tx: any) => Promise<any>) => {
         return fn({ user: mockUser, userProfile: mockUserProfile });
       }),
     },
   };
 });
+
+const mockEmailService = {
+  isConfigured: jest.fn(() => true),
+  sendOTP: jest.fn(),
+  sendEmailVerificationOTP: jest.fn().mockResolvedValue(undefined),
+  sendEmailChangeConfirmationOTP: jest.fn().mockResolvedValue(undefined),
+};
 
 import * as passwordUtils from '@/utils/password';
 import * as jwtUtils from '@/utils/jwt';
@@ -46,8 +67,11 @@ describe('AuthService Functional Tests', () => {
   let authService: AuthService;
 
   beforeEach(() => {
-    authService = new AuthService();
+    authService = new AuthService(mockPrisma, mockEmailService as any, undefined);
     jest.clearAllMocks();
+    mockEmailService.isConfigured.mockReturnValue(true);
+    mockEmailService.sendEmailVerificationOTP.mockResolvedValue(undefined);
+    mockEmailService.sendEmailChangeConfirmationOTP.mockResolvedValue(undefined);
   });
 
   describe('register', () => {
@@ -56,23 +80,24 @@ describe('AuthService Functional Tests', () => {
       const email = 'test@example.com';
       const password = 'SecurePass123!';
       const hashedPassword = 'hashed_password_123';
-      const token = 'jwt_token_123';
 
       const mockDbUser = {
         id: 'user_123',
         email,
         passwordHash: hashedPassword,
         subscriptionTier: 'free',
+        emailVerified: false,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
       mockPasswordUtils.validatePassword.mockImplementation(() => {});
       mockPasswordUtils.hashPassword.mockResolvedValue(hashedPassword);
-      mockJwtUtils.generateToken.mockReturnValue(token);
       mockPrisma.user.findUnique.mockResolvedValue(null);
       mockPrisma.user.create.mockResolvedValue(mockDbUser);
       mockPrisma.userProfile.create.mockResolvedValue({});
+      mockPrisma.emailVerificationOTP.create.mockResolvedValue({ id: 'otp1' });
 
       // Act
       const result = await authService.register(email, password);
@@ -84,10 +109,12 @@ describe('AuthService Functional Tests', () => {
           email,
           passwordHash: hashedPassword,
           subscriptionTier: SubscriptionTier.FREE,
+          emailVerified: false,
+          pendingEmail: null,
+          onboardingCompletedAt: null,
           createdAt: mockDbUser.createdAt,
           updatedAt: mockDbUser.updatedAt,
         },
-        token,
       });
 
       expect(mockPasswordUtils.validatePassword).toHaveBeenCalledWith(password);
@@ -100,8 +127,10 @@ describe('AuthService Functional Tests', () => {
           email: email.toLowerCase(),
           passwordHash: hashedPassword,
           subscriptionTier: SubscriptionTier.FREE,
+          emailVerified: false,
         },
       });
+      expect(mockEmailService.sendEmailVerificationOTP).toHaveBeenCalled();
     });
 
     it('should throw ValidationError for invalid email', async () => {
@@ -130,6 +159,72 @@ describe('AuthService Functional Tests', () => {
     });
   });
 
+  describe('verifyEmail', () => {
+    it('should verify OTP, clear rows, and return JWT', async () => {
+      const email = 'new@example.com';
+      const userRow = {
+        id: 'u1',
+        email,
+        authProvider: 'local',
+        emailVerified: false,
+        passwordHash: 'h',
+        subscriptionTier: 'free',
+        onboardingCompletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      const updatedUser = { ...userRow, emailVerified: true };
+
+      mockPrisma.user.findUnique.mockResolvedValue(userRow);
+      mockPrisma.emailVerificationOTP.findMany.mockResolvedValue([
+        {
+          id: 'otp1',
+          email,
+          otpHash: 'hash',
+          expiresAt: new Date(Date.now() + 60000),
+          createdAt: new Date()
+        }
+      ]);
+      mockPasswordUtils.verifyPassword.mockResolvedValue(true);
+      mockPrisma.emailVerificationOTP.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.user.update.mockResolvedValue(updatedUser);
+      mockJwtUtils.generateToken.mockReturnValue('jwt-after-verify');
+
+      const result = await authService.verifyEmail(email, '123456');
+
+      expect(result.user.emailVerified).toBe(true);
+      expect(result.token).toBe('jwt-after-verify');
+      expect(mockJwtUtils.generateToken).toHaveBeenCalledWith({
+        userId: 'u1',
+        email,
+        subscriptionTier: 'free',
+        emailVerified: true
+      });
+    });
+
+    it('should return token immediately if already verified', async () => {
+      const email = 'done@example.com';
+      const userRow = {
+        id: 'u2',
+        email,
+        authProvider: 'local',
+        emailVerified: true,
+        passwordHash: 'h',
+        subscriptionTier: 'free',
+        onboardingCompletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(userRow);
+      mockJwtUtils.generateToken.mockReturnValue('jwt-existing');
+
+      const result = await authService.verifyEmail(email, '000000');
+
+      expect(result.token).toBe('jwt-existing');
+      expect(mockPrisma.emailVerificationOTP.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('login', () => {
     it('should successfully login with valid credentials', async () => {
       // Arrange
@@ -143,6 +238,8 @@ describe('AuthService Functional Tests', () => {
         email,
         passwordHash: hashedPassword,
         subscriptionTier: 'free',
+        emailVerified: true,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -161,6 +258,9 @@ describe('AuthService Functional Tests', () => {
           email,
           passwordHash: hashedPassword,
           subscriptionTier: SubscriptionTier.FREE,
+          emailVerified: true,
+          pendingEmail: null,
+          onboardingCompletedAt: null,
           createdAt: mockDbUser.createdAt,
           updatedAt: mockDbUser.updatedAt,
         },
@@ -182,12 +282,32 @@ describe('AuthService Functional Tests', () => {
         .rejects.toThrow('Invalid credentials');
     });
 
+    it('should throw EmailNotVerifiedError when email is not verified', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user_123',
+        email: 'test@example.com',
+        passwordHash: 'hashed_password_123',
+        subscriptionTier: 'free',
+        emailVerified: false,
+        onboardingCompletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      mockPasswordUtils.verifyPassword.mockResolvedValue(true);
+
+      await expect(authService.login('test@example.com', 'SecurePass123!')).rejects.toThrow(
+        EmailNotVerifiedError
+      );
+    });
+
     it('should throw AuthenticationError for invalid password', async () => {
       const mockDbUser = {
         id: 'user_123',
         email: 'test@example.com',
         passwordHash: 'hashed_password_123',
         subscriptionTier: 'free',
+        emailVerified: true,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -210,6 +330,7 @@ describe('AuthService Functional Tests', () => {
         userId: 'user_123',
         email: 'test@example.com',
         subscriptionTier: 'free',
+        emailVerified: true
       };
 
       const mockDbUser = {
@@ -217,6 +338,8 @@ describe('AuthService Functional Tests', () => {
         email: 'test@example.com',
         passwordHash: 'hashed_password_123',
         subscriptionTier: 'free',
+        emailVerified: true,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -233,6 +356,9 @@ describe('AuthService Functional Tests', () => {
         email: 'test@example.com',
         passwordHash: 'hashed_password_123',
         subscriptionTier: SubscriptionTier.FREE,
+        emailVerified: true,
+        pendingEmail: null,
+        onboardingCompletedAt: null,
         createdAt: mockDbUser.createdAt,
         updatedAt: mockDbUser.updatedAt,
       });
@@ -256,6 +382,7 @@ describe('AuthService Functional Tests', () => {
         userId: 'user_123',
         email: 'test@example.com',
         subscriptionTier: 'free',
+        emailVerified: true
       };
 
       mockJwtUtils.validateToken.mockReturnValue(payload);
@@ -276,6 +403,9 @@ describe('AuthService Functional Tests', () => {
         email: 'test@example.com',
         passwordHash: 'hashed_password_123',
         subscriptionTier: SubscriptionTier.FREE,
+        emailVerified: true,
+        pendingEmail: null,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -295,6 +425,9 @@ describe('AuthService Functional Tests', () => {
         email: 'test@example.com',
         passwordHash: 'hashed_password_123',
         subscriptionTier: SubscriptionTier.FREE,
+        emailVerified: true,
+        pendingEmail: null,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -310,7 +443,121 @@ describe('AuthService Functional Tests', () => {
         userId: 'user_123',
         email: 'test@example.com',
         subscriptionTier: SubscriptionTier.FREE,
+        emailVerified: true,
       });
+    });
+  });
+
+  describe('requestEmailChange', () => {
+    const baseUser = {
+      id: 'u1',
+      email: 'old@example.com',
+      passwordHash: 'hash',
+      authProvider: 'local',
+      subscriptionTier: 'free',
+      emailVerified: true,
+      pendingEmail: null,
+      onboardingCompletedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    beforeEach(() => {
+      mockPasswordUtils.verifyPassword.mockResolvedValue(true);
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.emailVerificationOTP.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.emailVerificationOTP.create.mockResolvedValue({ id: 'otp' });
+    });
+
+    it('sets pending email and sends confirmation OTP', async () => {
+      const updated = { ...baseUser, pendingEmail: 'new@example.com' };
+      mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user.update.mockResolvedValue(updated);
+
+      const result = await authService.requestEmailChange('u1', 'new@example.com', 'password');
+
+      expect(result.pendingEmail).toBe('new@example.com');
+      expect(mockEmailService.sendEmailChangeConfirmationOTP).toHaveBeenCalledWith(
+        'new@example.com',
+        expect.stringMatching(/^\d{6}$/)
+      );
+    });
+
+    it('clears pending when new email equals current', async () => {
+      const cleared = { ...baseUser, pendingEmail: null };
+      mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user.update.mockResolvedValue(cleared);
+
+      const result = await authService.requestEmailChange('u1', 'old@example.com', 'password');
+
+      expect(result.pendingEmail).toBeNull();
+      expect(mockEmailService.sendEmailChangeConfirmationOTP).not.toHaveBeenCalled();
+    });
+
+    it('throws when email send fails and reverts pending', async () => {
+      const updated = { ...baseUser, pendingEmail: 'new@example.com' };
+      mockPrisma.user.findUnique.mockResolvedValue(baseUser);
+      mockPrisma.user.update.mockResolvedValue(updated);
+      mockEmailService.sendEmailChangeConfirmationOTP.mockRejectedValue(new Error('resend down'));
+
+      await expect(
+        authService.requestEmailChange('u1', 'new@example.com', 'password')
+      ).rejects.toThrow(ExternalServiceError);
+
+      expect(mockPrisma.emailVerificationOTP.deleteMany).toHaveBeenCalled();
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { pendingEmail: null }
+      });
+    });
+  });
+
+  describe('confirmEmailChange', () => {
+    it('applies pending email and returns new token', async () => {
+      const withPending = {
+        id: 'u1',
+        email: 'old@example.com',
+        pendingEmail: 'new@example.com',
+        passwordHash: 'h',
+        authProvider: 'local',
+        subscriptionTier: 'free',
+        emailVerified: true,
+        onboardingCompletedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      const finalUser = {
+        ...withPending,
+        email: 'new@example.com',
+        pendingEmail: null,
+        emailVerified: true
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(withPending);
+      mockPrisma.emailVerificationOTP.findMany.mockResolvedValue([
+        {
+          id: 'o1',
+          email: 'new@example.com',
+          otpHash: 'h',
+          expiresAt: new Date(Date.now() + 60000),
+          createdAt: new Date()
+        }
+      ]);
+      mockPasswordUtils.verifyPassword.mockResolvedValue(true);
+      mockPrisma.emailVerificationOTP.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrisma.user.update.mockResolvedValue(finalUser);
+      mockJwtUtils.generateToken.mockReturnValue('jwt-new');
+
+      const result = await authService.confirmEmailChange('u1', '123456');
+
+      expect(result.user.email).toBe('new@example.com');
+      expect(result.token).toBe('jwt-new');
+      expect(mockJwtUtils.generateToken).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'u1',
+          email: 'new@example.com',
+          emailVerified: true
+        })
+      );
     });
   });
 });

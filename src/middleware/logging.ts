@@ -180,8 +180,9 @@ export const sanitizeRequest = (req: Request, res: Response, next: NextFunction)
     }
   }
 
-  // Sanitize body (for string fields only)
-  if (req.body && typeof req.body === 'object') {
+  // Sanitize body (for string fields only). Skip multipart — body is parsed later by multer; touching it can break uploads.
+  const ct = (req.get('Content-Type') || '').toLowerCase();
+  if (!ct.includes('multipart/form-data') && req.body && typeof req.body === 'object') {
     sanitizeObject(req.body);
   }
 
@@ -242,6 +243,50 @@ export const apiVersioning = (req: Request, res: Response, next: NextFunction): 
  */
 export const requestTimeout = (timeoutMs: number = 30000) => {
   return (req: Request, res: Response, next: NextFunction): void => {
+    const timeout = setTimeout(() => {
+      if (!res.headersSent) {
+        res.status(408).json({
+          error: {
+            code: 'REQUEST_TIMEOUT',
+            message: 'Request timeout'
+          },
+          timestamp: new Date().toISOString(),
+          path: req.path
+        });
+      }
+    }, timeoutMs);
+
+    res.on('finish', () => {
+      clearTimeout(timeout);
+    });
+
+    res.on('close', () => {
+      clearTimeout(timeout);
+    });
+
+    next();
+  };
+};
+
+/**
+ * Route-aware timeouts: default for most APIs; longer for PATCH transcript (coaching);
+ * much longer for POST session audio (large multipart + S3 + AssemblyAI submit).
+ */
+export const requestTimeoutWithLongAiRoutes = (
+  defaultMs: number = 30000,
+  longAiMs: number = 120000,
+  /** Large interview files can take many minutes over slow links + upload + submit */
+  largeUploadMs: number = 20 * 60 * 1000
+) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const url = req.originalUrl || req.url || '';
+    let timeoutMs = defaultMs;
+    if (req.method === 'PATCH' && /\/api\/sessions\/[^/]+\/transcript\b/.test(url)) {
+      timeoutMs = longAiMs;
+    } else if (req.method === 'POST' && /\/api\/sessions\/[^/]+\/audio\b/.test(url)) {
+      timeoutMs = largeUploadMs;
+    }
+
     const timeout = setTimeout(() => {
       if (!res.headersSent) {
         res.status(408).json({

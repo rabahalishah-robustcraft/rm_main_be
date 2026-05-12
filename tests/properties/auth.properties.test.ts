@@ -9,15 +9,21 @@ jest.mock('../../src/lib/prisma', () => {
   const mockUser = {
     findUnique: jest.fn(),
     create: jest.fn(),
+    delete: jest.fn(),
   };
   const mockUserProfile = {
     create: jest.fn(),
+  };
+  const mockEmailVerificationOTP = {
+    create: jest.fn(),
+    deleteMany: jest.fn(),
   };
   return {
     __esModule: true,
     default: {
       user: mockUser,
       userProfile: mockUserProfile,
+      emailVerificationOTP: mockEmailVerificationOTP,
       $transaction: jest.fn(async (fn: (tx: any) => Promise<any>) => {
         return fn({ user: mockUser, userProfile: mockUserProfile });
       }),
@@ -44,11 +50,18 @@ const mockPrisma = prisma as any;
 const mockPasswordUtils = passwordUtils as jest.Mocked<typeof passwordUtils>;
 const mockJwtUtils = jwtUtils as jest.Mocked<typeof jwtUtils>;
 
+const mockEmailService = {
+  isConfigured: jest.fn(() => true),
+  sendOTP: jest.fn(),
+  sendEmailVerificationOTP: jest.fn().mockResolvedValue(undefined),
+  sendEmailChangeConfirmationOTP: jest.fn().mockResolvedValue(undefined),
+};
+
 describe('Authentication Property Tests', () => {
   let authService: AuthService;
 
   beforeAll(async () => {
-    authService = new AuthService();
+    authService = new AuthService(mockPrisma, mockEmailService as any, undefined);
   });
 
   beforeEach(() => {
@@ -63,9 +76,13 @@ describe('Authentication Property Tests', () => {
       userId: 'test-user-id',
       email: 'test@example.com',
       subscriptionTier: 'free',
+      emailVerified: true,
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 3600
     });
+    mockEmailService.isConfigured.mockReturnValue(true);
+    mockEmailService.sendEmailVerificationOTP.mockResolvedValue(undefined);
+    mockPrisma.emailVerificationOTP.create.mockResolvedValue({ id: 'otp' });
   });
 
   // Feature: ai-audio-summarization-backend, Property 1: User registration creates encrypted accounts
@@ -83,6 +100,8 @@ describe('Authentication Property Tests', () => {
               email: email.toLowerCase(),
               passwordHash: '$2b$12$mockedHashValue123456789012345678901234567890123456789',
               subscriptionTier: 'free',
+              emailVerified: false,
+              onboardingCompletedAt: null,
               createdAt: new Date(),
               updatedAt: new Date(),
             });
@@ -99,11 +118,8 @@ describe('Authentication Property Tests', () => {
             expect(result.user.passwordHash).toBeDefined();
             expect(result.user.passwordHash).not.toBe(password);
             expect(result.user.passwordHash!.length).toBeGreaterThan(50);
-            
-            // Verify JWT token is returned
-            expect(result.token).toBeDefined();
-            expect(typeof result.token).toBe('string');
-            expect(result.token.length).toBeGreaterThan(0);
+
+            expect(mockEmailService.sendEmailVerificationOTP).toHaveBeenCalled();
             
             // Verify password validation was called
             expect(mockPasswordUtils.validatePassword).toHaveBeenCalledWith(password);
@@ -131,6 +147,8 @@ describe('Authentication Property Tests', () => {
               email: email.toLowerCase(),
               passwordHash: '$2b$12$mockedHashValue123456789012345678901234567890123456789',
               subscriptionTier: 'free',
+              emailVerified: true,
+              onboardingCompletedAt: null,
               createdAt: new Date(),
               updatedAt: new Date(),
             });
@@ -174,6 +192,7 @@ describe('Authentication Property Tests', () => {
               userId,
               email,
               subscriptionTier,
+              emailVerified: true,
               iat: Math.floor(Date.now() / 1000),
               exp: Math.floor(Date.now() / 1000) + 3600
             });
@@ -184,6 +203,8 @@ describe('Authentication Property Tests', () => {
               email,
               passwordHash: 'mock-hash',
               subscriptionTier,
+              emailVerified: true,
+              onboardingCompletedAt: null,
               createdAt: new Date(),
               updatedAt: new Date(),
             });
@@ -223,6 +244,7 @@ describe('Authentication Property Tests', () => {
               userId,
               email,
               subscriptionTier,
+              emailVerified: true,
               iat: Math.floor(Date.now() / 1000),
               exp: Math.floor(Date.now() / 1000) + 3600
             });
@@ -233,6 +255,8 @@ describe('Authentication Property Tests', () => {
               email,
               passwordHash: 'mock-hash',
               subscriptionTier,
+              emailVerified: true,
+              onboardingCompletedAt: null,
               createdAt: new Date(),
               updatedAt: new Date(),
             });
@@ -310,7 +334,8 @@ describe('Authentication Property Tests', () => {
             const payload = {
               userId,
               email,
-              subscriptionTier
+              subscriptionTier,
+              emailVerified: true
             };
             
             // Mock token generation to return realistic JWT
@@ -322,6 +347,7 @@ describe('Authentication Property Tests', () => {
               userId,
               email,
               subscriptionTier,
+              emailVerified: true,
               iat: Math.floor(Date.now() / 1000),
               exp: Math.floor(Date.now() / 1000) + 3600
             });

@@ -2,6 +2,7 @@ import request from 'supertest';
 import { createApp } from '../../src/index';
 import { authService } from '../../src/services/AuthService';
 import prisma from '../../src/lib/prisma';
+import { safeEmailVerificationOTPDeleteMany } from './helpers/safePrismaCleanup';
 
 describe('Profile Routes Integration Tests', () => {
   let app: any;
@@ -11,10 +12,15 @@ describe('Profile Routes Integration Tests', () => {
   beforeAll(async () => {
     app = await createApp();
 
-    // Create a test user and get auth token
-    const testUser = await authService.register('test@example.com', 'Password123!');
-    authToken = testUser.token;
-    userId = testUser.user.id;
+    const { user } = await authService.register('test@example.com', 'Password123!');
+    userId = user.id;
+    await prisma.user.update({
+      where: { id: userId },
+      data: { emailVerified: true }
+    });
+    await safeEmailVerificationOTPDeleteMany(prisma, { email: 'test@example.com' });
+    const session = await authService.login('test@example.com', 'Password123!');
+    authToken = session.token;
   });
 
   afterAll(async () => {
@@ -22,6 +28,7 @@ describe('Profile Routes Integration Tests', () => {
     await prisma.userProfile.deleteMany({
       where: { userId }
     });
+    await safeEmailVerificationOTPDeleteMany(prisma, { email: 'test@example.com' });
     await prisma.user.deleteMany({
       where: { email: 'test@example.com' }
     });

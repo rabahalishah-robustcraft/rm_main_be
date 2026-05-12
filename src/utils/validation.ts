@@ -109,6 +109,19 @@ export const profileSchemas = {
     'object.min': 'At least one field must be provided for update'
   }),
 
+  /** Partial profile fields for onboarding merge (no min keys requirement). */
+  onboardingPartial: Joi.object({
+    fullName: Joi.string().max(100).trim().optional(),
+    currentJobTitle: Joi.string().max(100).trim().optional(),
+    currentCompany: Joi.string().max(100).trim().optional(),
+    school: Joi.string().max(200).trim().optional(),
+    degreeInfo: Joi.string().max(200).trim().optional(),
+    previousJobTitles: Joi.array().items(Joi.string().max(100).trim()).optional(),
+    targetIndustry: Joi.string().max(100).trim().optional(),
+    targetJobTitle: Joi.string().max(100).trim().optional(),
+    experienceLevel: Joi.string().max(50).trim().optional()
+  }),
+
   targetRole: Joi.object({
     industry: Joi.string().max(100).trim().required(),
     jobTitle: Joi.string().max(100).trim().required()

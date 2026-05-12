@@ -8,6 +8,11 @@ import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
 import container from '../../src/container';
 import { createApp } from '../../src/index';
+import {
+  getVerifiedAuthToken,
+  verifyUserEmailInDbAndLogin
+} from './helpers/verifiedAuth';
+import { safeEmailVerificationOTPDeleteMany } from './helpers/safePrismaCleanup';
 
 describe('Comprehensive System Integration Tests', () => {
   let app: any;
@@ -63,6 +68,9 @@ describe('Comprehensive System Integration Tests', () => {
             }
           }
         }
+      });
+      await safeEmailVerificationOTPDeleteMany(prisma, {
+        email: { contains: 'comprehensive-test' }
       });
       await prisma.user.deleteMany({
         where: {
@@ -168,14 +176,12 @@ describe('Comprehensive System Integration Tests', () => {
       let authToken: string;
 
       beforeAll(async () => {
-        // Create a test user for profile tests
-        const registerResponse = await request(app)
-          .post('/api/auth/register')
-          .send({
-            email: 'comprehensive-test-profile@example.com',
-            password: 'ValidPassword123!'
-          });
-        authToken = registerResponse.body.token;
+        const session = await getVerifiedAuthToken(
+          app,
+          'comprehensive-test-profile@example.com',
+          'ValidPassword123!'
+        );
+        authToken = session.token;
       });
 
       it('should validate profile update input', async () => {
@@ -225,16 +231,13 @@ describe('Comprehensive System Integration Tests', () => {
       let sessionId: string;
 
       beforeAll(async () => {
-        // Create a test user for session tests
-        const registerResponse = await request(app)
-          .post('/api/auth/register')
-          .send({
-            email: 'comprehensive-test-session@example.com',
-            password: 'ValidPassword123!'
-          });
-        authToken = registerResponse.body.token;
+        const session = await getVerifiedAuthToken(
+          app,
+          'comprehensive-test-session@example.com',
+          'ValidPassword123!'
+        );
+        authToken = session.token;
 
-        // Create a session
         const sessionResponse = await request(app)
           .post('/api/sessions/start')
           .set('Authorization', `Bearer ${authToken}`);
@@ -246,8 +249,8 @@ describe('Comprehensive System Integration Tests', () => {
         const invalidUuidResponse = await request(app)
           .get('/api/sessions/invalid-uuid')
           .set('Authorization', `Bearer ${authToken}`);
-        expect(invalidUuidResponse.status).toBe(400);
-        expect(invalidUuidResponse.body.error.code).toBe('VALIDATION_ERROR');
+        expect(invalidUuidResponse.status).toBe(404);
+        expect(invalidUuidResponse.body.error.code).toBe('SESSION_NOT_FOUND');
 
         // Test valid UUID
         const validResponse = await request(app)
@@ -281,14 +284,12 @@ describe('Comprehensive System Integration Tests', () => {
       let authToken: string;
 
       beforeAll(async () => {
-        // Create a test user for dashboard tests
-        const registerResponse = await request(app)
-          .post('/api/auth/register')
-          .send({
-            email: 'comprehensive-test-dashboard@example.com',
-            password: 'ValidPassword123!'
-          });
-        authToken = registerResponse.body.token;
+        const session = await getVerifiedAuthToken(
+          app,
+          'comprehensive-test-dashboard@example.com',
+          'ValidPassword123!'
+        );
+        authToken = session.token;
       });
 
       it('should validate dashboard query parameters', async () => {
@@ -321,37 +322,22 @@ describe('Comprehensive System Integration Tests', () => {
       let authToken: string;
 
       beforeAll(async () => {
-        // Create a test user for subscription tests
-        const registerResponse = await request(app)
-          .post('/api/auth/register')
-          .send({
-            email: 'comprehensive-test-subscription@example.com',
-            password: 'ValidPassword123!'
-          });
-        authToken = registerResponse.body.token;
+        const session = await getVerifiedAuthToken(
+          app,
+          'comprehensive-test-subscription@example.com',
+          'ValidPassword123!'
+        );
+        authToken = session.token;
       });
 
-      it('should validate subscription upgrade input', async () => {
-        // Test invalid tier
-        const invalidTierResponse = await request(app)
-          .post('/api/subscription/upgrade')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send({ tier: 'INVALID_TIER' });
-        expect(invalidTierResponse.status).toBe(400);
+      it('should require auth for subscription checkout session', async () => {
+        const unauth = await request(app).post('/api/subscription/checkout-session');
+        expect(unauth.status).toBe(401);
 
-        // Test missing tier
-        const missingTierResponse = await request(app)
-          .post('/api/subscription/upgrade')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send({});
-        expect(missingTierResponse.status).toBe(400);
-
-        // Test valid tier
-        const validResponse = await request(app)
-          .post('/api/subscription/upgrade')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send({ tier: 'PAID' });
-        expect(validResponse.status).toBe(200);
+        const authed = await request(app)
+          .post('/api/subscription/checkout-session')
+          .set('Authorization', `Bearer ${authToken}`);
+        expect([200, 502, 503]).toContain(authed.status);
       });
     });
   });
@@ -368,10 +354,15 @@ describe('Comprehensive System Integration Tests', () => {
 
       expect(registerResponse.status).toBe(201);
       expect(registerResponse.body.success).toBe(true);
-      expect(registerResponse.body.user).toBeDefined();
-      expect(registerResponse.body.token).toBeDefined();
+      expect(registerResponse.body.data.user).toBeDefined();
+      expect(registerResponse.body.data.token).toBeUndefined();
 
-      const { user, token } = registerResponse.body;
+      const user = registerResponse.body.data.user;
+      const { token } = await verifyUserEmailInDbAndLogin(
+        app,
+        'comprehensive-test-workflow@example.com',
+        'ValidPassword123!'
+      );
       testUsers.push({ id: user.id, email: user.email, token });
 
       // 2. Profile Management
@@ -399,7 +390,7 @@ describe('Comprehensive System Integration Tests', () => {
 
       // 4. Session History
       const historyResponse = await request(app)
-        .get('/api/sessions/history')
+        .get('/api/sessions/history?status=all')
         .set('Authorization', `Bearer ${token}`);
       expect(historyResponse.status).toBe(200);
       expect(historyResponse.body.data.sessions.length).toBeGreaterThan(0);
@@ -415,7 +406,7 @@ describe('Comprehensive System Integration Tests', () => {
         .get('/api/subscription/info')
         .set('Authorization', `Bearer ${token}`);
       expect(subscriptionInfoResponse.status).toBe(200);
-      expect(subscriptionInfoResponse.body.data.tier).toBe('FREE');
+      expect(subscriptionInfoResponse.body.data.tier.toLowerCase()).toBe('free');
     });
 
     it('should enforce authentication across all protected endpoints', async () => {
@@ -446,27 +437,46 @@ describe('Comprehensive System Integration Tests', () => {
     });
 
     it('should enforce data isolation between users', async () => {
-      // Create two users
-      const user1Response = await request(app)
+      await request(app)
         .post('/api/auth/register')
         .send({
           email: 'comprehensive-test-user1@example.com',
           password: 'ValidPassword123!'
-        });
+        })
+        .expect(201);
 
-      const user2Response = await request(app)
+      await request(app)
         .post('/api/auth/register')
         .send({
           email: 'comprehensive-test-user2@example.com',
           password: 'ValidPassword123!'
-        });
+        })
+        .expect(201);
 
-      const user1Token = user1Response.body.token;
-      const user2Token = user2Response.body.token;
+      const user1Session = await verifyUserEmailInDbAndLogin(
+        app,
+        'comprehensive-test-user1@example.com',
+        'ValidPassword123!'
+      );
+      const user2Session = await verifyUserEmailInDbAndLogin(
+        app,
+        'comprehensive-test-user2@example.com',
+        'ValidPassword123!'
+      );
+      const user1Token = user1Session.token;
+      const user2Token = user2Session.token;
 
       testUsers.push(
-        { id: user1Response.body.user.id, email: user1Response.body.user.email, token: user1Token },
-        { id: user2Response.body.user.id, email: user2Response.body.user.email, token: user2Token }
+        {
+          id: user1Session.userId,
+          email: 'comprehensive-test-user1@example.com',
+          token: user1Token
+        },
+        {
+          id: user2Session.userId,
+          email: 'comprehensive-test-user2@example.com',
+          token: user2Token
+        }
       );
 
       // Create session for user1
@@ -495,17 +505,16 @@ describe('Comprehensive System Integration Tests', () => {
     let authToken: string;
 
     beforeAll(async () => {
-      const registerResponse = await request(app)
-        .post('/api/auth/register')
-        .send({
-          email: 'comprehensive-test-errors@example.com',
-          password: 'ValidPassword123!'
-        });
-      authToken = registerResponse.body.token;
-      testUsers.push({ 
-        id: registerResponse.body.user.id, 
-        email: registerResponse.body.user.email, 
-        token: authToken 
+      const session = await getVerifiedAuthToken(
+        app,
+        'comprehensive-test-errors@example.com',
+        'ValidPassword123!'
+      );
+      authToken = session.token;
+      testUsers.push({
+        id: session.userId,
+        email: 'comprehensive-test-errors@example.com',
+        token: authToken
       });
     });
 
@@ -612,56 +621,51 @@ describe('Comprehensive System Integration Tests', () => {
     let paidUserToken: string;
 
     beforeAll(async () => {
-      // Create free tier user
-      const freeUserResponse = await request(app)
-        .post('/api/auth/register')
-        .send({
-          email: 'comprehensive-test-free@example.com',
-          password: 'ValidPassword123!'
-        });
-      freeUserToken = freeUserResponse.body.token;
-      testUsers.push({ 
-        id: freeUserResponse.body.user.id, 
-        email: freeUserResponse.body.user.email, 
-        token: freeUserToken 
+      const freeSession = await getVerifiedAuthToken(
+        app,
+        'comprehensive-test-free@example.com',
+        'ValidPassword123!'
+      );
+      freeUserToken = freeSession.token;
+      testUsers.push({
+        id: freeSession.userId,
+        email: 'comprehensive-test-free@example.com',
+        token: freeUserToken
       });
 
-      // Create paid tier user
-      const paidUserResponse = await request(app)
-        .post('/api/auth/register')
-        .send({
-          email: 'comprehensive-test-paid@example.com',
-          password: 'ValidPassword123!'
-        });
-      paidUserToken = paidUserResponse.body.token;
-      testUsers.push({ 
-        id: paidUserResponse.body.user.id, 
-        email: paidUserResponse.body.user.email, 
-        token: paidUserToken 
+      const paidSession = await getVerifiedAuthToken(
+        app,
+        'comprehensive-test-paid@example.com',
+        'ValidPassword123!'
+      );
+      paidUserToken = paidSession.token;
+      testUsers.push({
+        id: paidSession.userId,
+        email: 'comprehensive-test-paid@example.com',
+        token: paidUserToken
       });
 
-      // Upgrade second user to paid
-      await request(app)
-        .post('/api/subscription/upgrade')
-        .set('Authorization', `Bearer ${paidUserToken}`)
-        .send({ tier: 'PAID' });
+      const paidUser = testUsers.find((u) => u.email === 'comprehensive-test-paid@example.com');
+      if (paidUser) {
+        await prisma.user.update({
+          where: { id: paidUser.id },
+          data: { subscriptionTier: 'paid' }
+        });
+      }
     });
 
-    it('should enforce free tier limits', async () => {
-      // Create 3 sessions (free tier limit)
+    it('allows three interview starts per month on free tier then returns 429', async () => {
       for (let i = 0; i < 3; i++) {
         const response = await request(app)
           .post('/api/sessions/start')
           .set('Authorization', `Bearer ${freeUserToken}`);
         expect(response.status).toBe(201);
       }
-
-      // Fourth session should be blocked
-      const blockedResponse = await request(app)
+      const fourth = await request(app)
         .post('/api/sessions/start')
         .set('Authorization', `Bearer ${freeUserToken}`);
-      expect(blockedResponse.status).toBe(429);
-      expect(blockedResponse.body.error.code).toBe('USAGE_LIMIT_EXCEEDED');
+      expect(fourth.status).toBe(429);
+      expect(fourth.body.error.code).toBe('INTERVIEW_SESSION_LIMIT_EXCEEDED');
     });
 
     it('should allow unlimited sessions for paid tier', async () => {

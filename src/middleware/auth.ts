@@ -8,6 +8,9 @@ interface User {
   email: string;
   passwordHash: string | null;
   subscriptionTier: SubscriptionTier;
+  emailVerified: boolean;
+  pendingEmail: string | null;
+  onboardingCompletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +72,9 @@ export const authenticate = async (
       email: user.email,
       passwordHash: user.passwordHash,
       subscriptionTier: user.subscriptionTier as SubscriptionTier,
+      emailVerified: user.emailVerified,
+      pendingEmail: user.pendingEmail ?? null,
+      onboardingCompletedAt: user.onboardingCompletedAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt
     };
@@ -76,6 +82,36 @@ export const authenticate = async (
     // Attach user to request
     req.user = appUser;
 
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Require verified email (after authenticate). Use for app features post-signup verification.
+ */
+export const requireEmailVerified = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void => {
+  try {
+    if (!req.user) {
+      throw new AuthenticationError('Authentication required');
+    }
+    if (!req.user.emailVerified) {
+      res.status(403).json({
+        error: {
+          code: 'EMAIL_NOT_VERIFIED',
+          message: 'Please verify your email to access this resource.',
+          details: { email: req.user.email }
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path
+      });
+      return;
+    }
     next();
   } catch (error) {
     next(error);
@@ -107,6 +143,9 @@ export const optionalAuthenticate = async (
           email: user.email,
           passwordHash: user.passwordHash,
           subscriptionTier: user.subscriptionTier as SubscriptionTier,
+          emailVerified: user.emailVerified,
+          pendingEmail: user.pendingEmail ?? null,
+          onboardingCompletedAt: user.onboardingCompletedAt,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt
         };
@@ -361,4 +400,10 @@ export const validateAccountStatus = async (
   }
 };
 // Export types and functions
-export { User, AuthenticatedRequest, SubscriptionTier, AuthenticationError, AuthorizationError };
+export {
+  User,
+  AuthenticatedRequest,
+  SubscriptionTier,
+  AuthenticationError,
+  AuthorizationError
+};

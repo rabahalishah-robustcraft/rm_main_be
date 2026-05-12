@@ -250,6 +250,104 @@ export class ProfileService implements IProfileService {
   }
 
   /**
+   * Extract structured resume/candidate data from plain text (GPT + keyword fallback).
+   * Used by onboarding merge without writing to DB.
+   */
+  async extractStructuredResumeData(extractedText: string): Promise<ResumeData> {
+    if (!extractedText || extractedText.trim().length === 0) {
+      throw new ValidationError('Extracted text is required');
+    }
+    if (!this.openaiService) {
+      throw new ExternalServiceError('OpenAI service not available');
+    }
+    try {
+      const resumeData = await this.openaiService.extractResumeData(extractedText);
+      this.validateResumeData(resumeData);
+      return resumeData;
+    } catch (error) {
+      console.warn(
+        `GPT extraction failed, using keyword fallback. Reason: ${(error as Error).message}`,
+        error
+      );
+      return this.extractResumeDataWithKeywords(extractedText);
+    }
+  }
+
+  /**
+   * Upload resume bytes to S3 and set resumeS3Key only (no AI extraction).
+   */
+  /**
+   * Extract plain text from the user's stored resume in S3, if any.
+   */
+  async getResumePlainTextForUser(userId: string): Promise<string | null> {
+    if (!ValidationUtils.isValidUUID(userId)) {
+      throw new ValidationError('Invalid user ID format');
+    }
+    const p = await this.prisma.userProfile.findUnique({
+      where: { userId },
+      select: { resumeS3Key: true }
+    });
+    if (!p?.resumeS3Key) {
+      return null;
+    }
+    const fileBuffer = await this.s3Service.download(p.resumeS3Key);
+    const filename = p.resumeS3Key.split('/').pop() || 'resume.pdf';
+    return await this.resumeTextExtractor.extractText(fileBuffer, filename);
+  }
+
+  async uploadResumeStorageOnly(userId: string, file: Buffer, filename: string): Promise<string> {
+    if (!ValidationUtils.isValidUUID(userId)) {
+      throw new ValidationError('Invalid user ID format');
+    }
+    if (!file?.length) {
+      throw new ValidationError('File is required');
+    }
+    if (!filename) {
+      throw new ValidationError('Filename is required');
+    }
+    validateFileBuffer(file, filename, {
+      allowedTypes: S3_CONFIG.ALLOWED_FILE_TYPES,
+      maxSizeBytes: S3_CONFIG.MAX_FILE_SIZE
+    });
+
+    const existingProfile = await this.prisma.userProfile.findUnique({
+      where: { userId }
+    });
+    if (!existingProfile) {
+      throw new NotFoundError('Profile not found');
+    }
+
+    const sanitizedFilename = sanitizeFilename(filename);
+    const s3Key = this.s3Service.generateFileKey(S3_CONFIG.RESUME_PREFIX, userId, sanitizedFilename);
+    const fileExtension = filename.toLowerCase().substring(filename.lastIndexOf('.'));
+    const contentType = getContentTypeFromExtension(fileExtension);
+
+    await this.s3Service.upload(s3Key, file, {
+      contentType,
+      metadata: {
+        userId,
+        originalFilename: filename,
+        uploadedAt: new Date().toISOString()
+      }
+    });
+
+    if (existingProfile.resumeS3Key) {
+      try {
+        await this.s3Service.deleteFile(existingProfile.resumeS3Key);
+      } catch (e) {
+        console.warn(`Failed to delete old resume: ${existingProfile.resumeS3Key}`, e);
+      }
+    }
+
+    await this.prisma.userProfile.update({
+      where: { userId },
+      data: { resumeS3Key: s3Key }
+    });
+
+    return s3Key;
+  }
+
+  /**
    * Process resume from extracted text using AI
    * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 8.4
    */
@@ -275,28 +373,7 @@ export class ProfileService implements IProfileService {
 
       // Use OpenAI to extract structured data from the text
       // Requirement 4.1: Call OpenAIService.extractResumeData()
-      if (!this.openaiService) {
-        throw new ExternalServiceError('OpenAI service not available');
-      }
-
-      let resumeData: ResumeData;
-      try {
-        resumeData = await this.openaiService.extractResumeData(extractedText);
-        
-        // Validate extracted data structure before storing
-        // Requirement 4.3: Validate JSON structure contains required fields
-        this.validateResumeData(resumeData);
-      } catch (error) {
-        // Requirement 4.5: Use basic keyword extraction as fallback for GPT failures
-        // Requirement 8.4: Log that fallback was used and why
-        console.warn(
-          `GPT extraction failed for user ${userId}, using keyword extraction fallback. ` +
-          `Reason: ${(error as Error).message}`,
-          error
-        );
-        
-        resumeData = this.extractResumeDataWithKeywords(extractedText);
-      }
+      const resumeData = await this.extractStructuredResumeData(extractedText);
 
       // Prepare update data with extracted information
       const updateData: UpdateProfileData = {

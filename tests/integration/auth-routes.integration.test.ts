@@ -13,9 +13,13 @@ const mockAuthService = {
   loginWithGoogle: jest.fn(),
   requestPasswordReset: jest.fn(),
   verifyOTP: jest.fn(),
+  verifyEmail: jest.fn(),
+  resendVerificationEmail: jest.fn(),
   resetPassword: jest.fn(),
   changePassword: jest.fn(),
-  changeEmail: jest.fn(),
+  requestEmailChange: jest.fn(),
+  confirmEmailChange: jest.fn(),
+  resendEmailChangeOtp: jest.fn(),
 };
 
 // Mock Prisma to avoid database dependencies
@@ -49,15 +53,15 @@ describe('Authentication Routes Integration', () => {
         email: 'test@example.com',
         passwordHash: 'hashed-password',
         subscriptionTier: SubscriptionTier.FREE,
+        emailVerified: false,
+        pendingEmail: null,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
       };
 
-      const mockToken = 'jwt-token-123';
-
       mockAuthService.register.mockResolvedValue({
-        user: mockUser,
-        token: mockToken
+        user: mockUser
       });
 
       const response = await request(app)
@@ -71,9 +75,9 @@ describe('Authentication Routes Integration', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.data.user.email).toBe('test@example.com');
       expect(response.body.data.user.subscriptionTier).toBe(SubscriptionTier.FREE);
-      expect(response.body.data.token).toBe(mockToken);
+      expect(response.body.data.token).toBeUndefined();
       expect(response.body.data.user.passwordHash).toBeUndefined();
-      expect(response.body.message).toBe('User registered successfully');
+      expect(response.body.message).toContain('verification');
 
       expect(mockAuthService.register).toHaveBeenCalledWith('test@example.com', 'Password123!');
     });
@@ -122,6 +126,9 @@ describe('Authentication Routes Integration', () => {
         email: 'test@example.com',
         passwordHash: 'hashed-password',
         subscriptionTier: SubscriptionTier.FREE,
+        emailVerified: true,
+        pendingEmail: null,
+        onboardingCompletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date()
       };

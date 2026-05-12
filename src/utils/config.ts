@@ -26,6 +26,14 @@ const configSchema = Joi.object({
   OPENAI_MODEL: Joi.string().default('gpt-3.5-turbo'),
   OPENAI_MAX_TOKENS: Joi.number().integer().min(1).default(1000),
   OPENAI_TEMPERATURE: Joi.number().min(0).max(2).default(0.7),
+
+  // AssemblyAI + coaching webhooks (optional; required when using session audio pipeline)
+  ASSEMBLYAI_API_KEY: Joi.string().optional().allow(''),
+  ASSEMBLYAI_WEBHOOK_SECRET: Joi.string().optional().allow(''),
+  WEBHOOK_BASE_URL: Joi.string().optional().allow(''),
+  COACHING_MODEL: Joi.string().optional().allow(''),
+  /** Comma-separated AssemblyAI speech models, e.g. "universal-3-pro" or "universal-2,universal-3-pro" */
+  ASSEMBLYAI_SPEECH_MODELS: Joi.string().optional().allow(''),
   
   // AWS Configuration
   AWS_ACCESS_KEY_ID: Joi.string().required(),
@@ -46,13 +54,35 @@ const configSchema = Joi.object({
   AUTH_RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(900000), // 15 minutes
   AUTH_RATE_LIMIT_MAX_ATTEMPTS: Joi.number().integer().min(1).default(10), // Increased from 5 to 10 attempts per window
   
-  // File Upload Configuration
-  MAX_FILE_SIZE: Joi.number().integer().min(1).default(50 * 1024 * 1024), // 50MB
+  // File Upload Configuration (session audio multipart, express json/urlencoded cap)
+  MAX_FILE_SIZE: Joi.number().integer().min(1).default(200 * 1024 * 1024), // 200MB — long high-quality interviews
+  /** Express request timeout for POST .../sessions/:id/audio (ms). Large files + S3 + AssemblyAI submit. */
+  AUDIO_UPLOAD_REQUEST_TIMEOUT_MS: Joi.number().integer().min(60000).max(3600000).default(20 * 60 * 1000),
   ALLOWED_FILE_TYPES: Joi.string().default('pdf,doc,docx,mp3,wav,m4a'),
   
   // Subscription Configuration
   FREE_TIER_MONTHLY_LIMIT: Joi.number().integer().min(0).default(3),
   PAID_TIER_MONTHLY_LIMIT: Joi.number().integer().min(-1).default(-1), // -1 = unlimited
+
+  // Stripe Billing (optional in test; set for Checkout + webhooks)
+  STRIPE_SECRET_KEY: Joi.string().optional().allow(''),
+  STRIPE_PRICE_ID: Joi.string().optional().allow(''),
+  STRIPE_WEBHOOK_SECRET: Joi.string().optional().allow(''),
+  STRIPE_CHECKOUT_SUCCESS_URL: Joi.string().uri().optional().allow(''),
+  STRIPE_CHECKOUT_CANCEL_URL: Joi.string().uri().optional().allow(''),
+  /** Return URL after Customer Portal session (Settings → Billing portal in Dashboard) */
+  STRIPE_BILLING_PORTAL_RETURN_URL: Joi.string().uri().optional().allow(''),
+  /**
+   * Customer Portal configuration id (bpc_...). Required for cancellations/customization to match what you set in Dashboard — without it, Stripe may use a default portal without cancel.
+   * Stripe Dashboard → Settings → Billing → Customer portal → copy configuration id, or API: BillingPortal.Configuration list.
+   */
+  STRIPE_BILLING_PORTAL_CONFIGURATION_ID: Joi.string().optional().allow(''),
+  /**
+   * Optional HTTPS origin for your app’s web pages (Expo deep-link landing pages, etc.).
+   * When set, success/cancel/portal URLs default to {base}/billing/success, /billing/canceled, /billing
+   * if those STRIPE_*_URL vars are omitted.
+   */
+  STRIPE_PUBLIC_APP_BASE_URL: Joi.string().uri().optional().allow(''),
   
   // Monitoring Configuration
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
@@ -100,6 +130,12 @@ export interface Config {
   OPENAI_MODEL: string;
   OPENAI_MAX_TOKENS: number;
   OPENAI_TEMPERATURE: number;
+
+  ASSEMBLYAI_API_KEY?: string;
+  ASSEMBLYAI_WEBHOOK_SECRET?: string;
+  WEBHOOK_BASE_URL?: string;
+  COACHING_MODEL?: string;
+  ASSEMBLYAI_SPEECH_MODELS?: string;
   
   // AWS Configuration
   AWS_ACCESS_KEY_ID: string;
@@ -122,11 +158,21 @@ export interface Config {
   
   // File Upload Configuration
   MAX_FILE_SIZE: number;
+  AUDIO_UPLOAD_REQUEST_TIMEOUT_MS: number;
   ALLOWED_FILE_TYPES: string;
   
   // Subscription Configuration
   FREE_TIER_MONTHLY_LIMIT: number;
   PAID_TIER_MONTHLY_LIMIT: number;
+
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_PRICE_ID?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  STRIPE_CHECKOUT_SUCCESS_URL?: string;
+  STRIPE_CHECKOUT_CANCEL_URL?: string;
+  STRIPE_BILLING_PORTAL_RETURN_URL?: string;
+  STRIPE_BILLING_PORTAL_CONFIGURATION_ID?: string;
+  STRIPE_PUBLIC_APP_BASE_URL?: string;
   
   // Monitoring Configuration
   LOG_LEVEL: string;
@@ -152,6 +198,34 @@ export interface Config {
   ENABLE_ADMIN_ENDPOINTS: boolean;
 }
 
+/** Trim and strip accidental wrapping quotes from .env values (common copy/paste issue). */
+function normalizeEnvString(s: string | undefined): string | undefined {
+  if (s == null || s === '') return undefined;
+  let t = String(s).trim();
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+    t = t.slice(1, -1).trim();
+  }
+  return t === '' ? undefined : t;
+}
+
+/** Fill Stripe redirect URLs from STRIPE_PUBLIC_APP_BASE_URL when individual URLs are unset. */
+function applyStripeRedirectDefaults(
+  publicBase: string | undefined,
+  success: string | undefined,
+  cancel: string | undefined,
+  portal: string | undefined
+): { success?: string; cancel?: string; portal?: string } {
+  const b = publicBase?.replace(/\/$/, '');
+  if (!b) {
+    return { success, cancel, portal };
+  }
+  return {
+    success: success || `${b}/billing/success`,
+    cancel: cancel || `${b}/billing/canceled`,
+    portal: portal || `${b}/billing`
+  };
+}
+
 /**
  * Validate and load configuration
  */
@@ -169,7 +243,32 @@ function loadConfig(): Config {
     throw new Error(`Configuration validation failed:\n${errorMessages}`);
   }
 
-  return value as Config;
+  const v = value as Config;
+  const stripePublicBase = normalizeEnvString(v.STRIPE_PUBLIC_APP_BASE_URL);
+  let stripeSuccess = normalizeEnvString(v.STRIPE_CHECKOUT_SUCCESS_URL);
+  let stripeCancel = normalizeEnvString(v.STRIPE_CHECKOUT_CANCEL_URL);
+  let stripePortalReturn = normalizeEnvString(v.STRIPE_BILLING_PORTAL_RETURN_URL);
+  const derived = applyStripeRedirectDefaults(stripePublicBase, stripeSuccess, stripeCancel, stripePortalReturn);
+  stripeSuccess = derived.success;
+  stripeCancel = derived.cancel;
+  stripePortalReturn = derived.portal;
+
+  return {
+    ...v,
+    ASSEMBLYAI_API_KEY: normalizeEnvString(v.ASSEMBLYAI_API_KEY),
+    ASSEMBLYAI_WEBHOOK_SECRET: normalizeEnvString(v.ASSEMBLYAI_WEBHOOK_SECRET),
+    WEBHOOK_BASE_URL: normalizeEnvString(v.WEBHOOK_BASE_URL),
+    COACHING_MODEL: normalizeEnvString(v.COACHING_MODEL),
+    ASSEMBLYAI_SPEECH_MODELS: normalizeEnvString(v.ASSEMBLYAI_SPEECH_MODELS),
+    STRIPE_SECRET_KEY: normalizeEnvString(v.STRIPE_SECRET_KEY),
+    STRIPE_PRICE_ID: normalizeEnvString(v.STRIPE_PRICE_ID),
+    STRIPE_WEBHOOK_SECRET: normalizeEnvString(v.STRIPE_WEBHOOK_SECRET),
+    STRIPE_CHECKOUT_SUCCESS_URL: stripeSuccess,
+    STRIPE_CHECKOUT_CANCEL_URL: stripeCancel,
+    STRIPE_BILLING_PORTAL_RETURN_URL: stripePortalReturn,
+    STRIPE_BILLING_PORTAL_CONFIGURATION_ID: normalizeEnvString(v.STRIPE_BILLING_PORTAL_CONFIGURATION_ID),
+    STRIPE_PUBLIC_APP_BASE_URL: stripePublicBase
+  };
 }
 
 /**
@@ -325,9 +424,9 @@ export function checkConfigHealth(): { healthy: boolean; issues: string[] } {
     issues.push('No admin access configured (ADMIN_EMAILS or ADMIN_DOMAINS)');
   }
 
-  // Check file size limits
-  if (config.MAX_FILE_SIZE > 100 * 1024 * 1024) { // 100MB
-    issues.push('MAX_FILE_SIZE is very large, consider reducing for security');
+  // Check file size limits (advisory only)
+  if (config.MAX_FILE_SIZE > 512 * 1024 * 1024) {
+    issues.push('MAX_FILE_SIZE exceeds 512MB — confirm reverse proxy and memory limits');
   }
 
   return {

@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { ServiceContainer } from '../container';
 import { createAuthRoutes } from './auth';
 import { createProfileRoutes } from './profile';
+import { createOnboardingRoutes } from './onboarding';
 import { createSessionRoutes } from './sessions';
+import { createPracticeRoutes } from './practice';
+import { createWebhookRoutes } from './webhooks';
 import { createSubscriptionRoutes } from './subscription';
 import { createDashboardRoutes } from './dashboard';
 import { createAdminRoutes } from './admin';
@@ -17,8 +20,15 @@ export function createApiRoutes(services: ServiceContainer): Router {
   // Mount profile routes
   router.use('/profile', createProfileRoutes(services));
 
+  router.use('/onboarding', createOnboardingRoutes(services));
+
   // Mount session routes
   router.use('/sessions', createSessionRoutes(services));
+
+  router.use('/practice', createPracticeRoutes(services));
+
+  // AssemblyAI webhooks (no JWT; secret header verification)
+  router.use('/webhooks', createWebhookRoutes(services));
 
   // Mount subscription routes
   router.use('/subscription', createSubscriptionRoutes(services));
@@ -60,7 +70,17 @@ export function createApiRoutes(services: ServiceContainer): Router {
           'POST /api/auth/verify-otp': 'Verify OTP, get reset token',
           'POST /api/auth/reset-password': 'Reset password with reset token',
           'POST /api/auth/change-password': 'Change password (authenticated)',
-          'POST /api/auth/change-email': 'Change email (authenticated, password required)'
+          'POST /api/auth/change-email/request': 'Start email change (password + new email, OTP to new address)',
+          'POST /api/auth/change-email/confirm': 'Confirm email change with OTP (returns new JWT)',
+          'POST /api/auth/change-email/resend': 'Resend email change OTP',
+          'POST /api/auth/verify-email': 'Verify signup OTP, get session JWT',
+          'POST /api/auth/resend-verification': 'Resend signup verification email'
+        },
+        onboarding: {
+          'POST /api/onboarding/primary': 'Onboarding step 1: resume or manual profile',
+          'POST /api/onboarding/voice': 'Optional: audio intro, merge into profile',
+          'POST /api/onboarding/primary/voice': 'Same as /onboarding/voice',
+          'POST /api/onboarding/complete': 'Finish onboarding, set personalization context'
         },
         profile: {
           'GET /api/profile': 'Get user profile',
@@ -74,14 +94,25 @@ export function createApiRoutes(services: ServiceContainer): Router {
         sessions: {
           'POST /api/sessions/start': 'Start a new audio session',
           'POST /api/sessions/:id/audio': 'Upload audio to session',
-          'PATCH /api/sessions/:id/transcript': 'Update transcript and resubmit for insights',
+          'POST /api/sessions/:id/assembly-sync': 'Pull transcript from AssemblyAI when webhook failed',
+          'PATCH /api/sessions/:id/transcript': 'Submit edited compact transcript array for coaching analysis',
           'PATCH /api/sessions/:id': 'Update session display name (event label)',
           'GET /api/sessions/:id': 'Get session details',
-          'GET /api/sessions/history': 'Get session history'
+          'GET /api/sessions/history': 'Get session history (optional query sessionType=interview|practice|all)'
+        },
+        practice: {
+          'GET /api/practice/questions': 'Get 3 sections × 3 questions; free=24h cache (refresh=Pro-only); paid=refresh anytime',
+          'POST /api/practice/sessions': 'Submit practice audio + question; returns coaching report (multipart)',
+          'PATCH /api/practice/sessions/:id': 'Re-analyze edited answer text in place (JSON body: transcript)'
+        },
+        webhooks: {
+          'POST /api/webhooks/assemblyai': 'AssemblyAI transcription completion callback (no JWT)',
+          'POST /api/webhooks/stripe': 'Stripe Billing webhooks (signed; raw JSON)'
         },
         subscription: {
           'GET /api/subscription/info': 'Get subscription and usage information',
-          'POST /api/subscription/upgrade': 'Upgrade subscription tier'
+          'POST /api/subscription/checkout-session': 'Create Stripe Checkout session (returns url)',
+          'POST /api/subscription/billing-portal': 'Create Stripe Customer Portal session (returns url); optional body { intent: "cancel_subscription" } for cancel deep link'
         },
         dashboard: {
           'GET /api/dashboard/stats': 'Get comprehensive dashboard statistics',

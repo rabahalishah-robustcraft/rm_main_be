@@ -54,7 +54,7 @@ Rate limits apply to auth endpoints (see Rate limiting below). All auth routes u
 
 ### POST /api/auth/register
 
-Register a new user.
+Register a new user (local email/password). Sends a **6-digit verification OTP** via email (Resend). No session JWT is returned until the email is verified.
 
 **Auth:** No  
 **Rate limit:** Yes (auth)
@@ -66,8 +66,38 @@ Register a new user.
 | email    | string | Yes      | Valid email                                     |
 | password | string | Yes      | Min 8 chars; uppercase, lowercase, number, special |
 
-**Response:** `201` — `{ success, message, data: { user, token } }`  
-**Errors:** `400` (validation), `409` (email exists)
+**Response:** `201` — `{ success, message, data: { user } }` — `user` includes `emailVerified: false` until verified. No `token` in the response (use `verify-email` after OTP).
+
+**Errors:** `400` (validation), `502` (verification email could not be sent — registration is rolled back when Resend is configured).
+
+**Development / CI:** When `NODE_ENV=test` and Resend is not configured, registration creates the user without sending email or creating an OTP row (for integration tests that mark the user verified in the database). Production and normal development must set `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` so signup emails are sent.
+
+---
+
+### POST /api/auth/verify-email
+
+Verify signup OTP and receive a session JWT.
+
+**Auth:** No  
+**Rate limit:** Yes (same bucket as password-reset OTP)
+
+**Request body:** `{ email: string, otp: string }` — OTP is 6 digits.
+
+**Response:** `200` — `{ success, message, data: { user, token } }`  
+**Errors:** `400` (validation), `401` (invalid or expired code)
+
+---
+
+### POST /api/auth/resend-verification
+
+Resend signup verification OTP (silent if user does not exist or is already verified).
+
+**Auth:** No  
+**Rate limit:** Yes
+
+**Request body:** `{ email: string }`
+
+**Response:** `200` — generic success message (no enumeration).
 
 ---
 
@@ -78,7 +108,9 @@ Login with email and password.
 **Request body:** `{ email: string, password: string }`
 
 **Response:** `200` — `{ success, message, data: { user, token } }`  
-**Errors:** `400` (validation), `401` (invalid credentials)
+**Errors:** `400` (validation), `401` (invalid credentials), `403` — `EMAIL_NOT_VERIFIED` if the account has not completed email verification
+
+---
 
 ---
 
@@ -99,7 +131,7 @@ Get current user info.
 
 **Auth:** Yes
 
-**Response:** `200` — `{ id, email, subscriptionTier, createdAt, updatedAt }`  
+**Response:** `200` — `{ id, email, subscriptionTier, emailVerified, pendingEmail, onboardingCompletedAt, createdAt, updatedAt }` — `pendingEmail` is set while a settings email change awaits OTP confirmation.  
 **Errors:** `401`
 
 ---
@@ -152,7 +184,7 @@ Verify OTP and receive reset token.
 
 ### POST /api/auth/reset-password
 
-Reset password using reset token.
+Reset password using the short-lived **reset token** from `verify-otp`. Use this for users who are **logged out** (e.g. login page “Forgot password”). Do **not** use `change-password` without a session; that endpoint is for authenticated users who know their current password.
 
 **Request body:** `{ resetToken: string, newPassword: string }` — newPassword same rules as register
 
@@ -175,13 +207,45 @@ Change password (authenticated). Current password required.
 
 ---
 
-### POST /api/auth/change-email
+### POST /api/auth/change-email/request
 
-Change email (authenticated). Password required.
+Start an email change (authenticated). Re-authenticates with **password**, stores a **pending** new address, sends a 6-digit OTP to that address (Resend). The account **login email** does not change until confirm succeeds.
+
+**Auth:** Yes  
+**Rate limit:** Yes (auth)
 
 **Request body:** `{ newEmail: string, password: string }`
 
-**Response:** `200` — `{ success, message, user }`  
+**Response:** `200` — `{ success, message, user }` — `user` includes `pendingEmail` when a code was sent; if `newEmail` equals the current email, pending state is cleared and no email is sent.
+
+**Errors:** `400`, `401`, `502` (email could not be sent — pending is not left in a half-applied state)
+
+---
+
+### POST /api/auth/change-email/confirm
+
+Confirm the pending email with the OTP from the new inbox. Returns a **new JWT** — replace the stored access token so `email` in the payload matches the updated account.
+
+**Auth:** Yes  
+**Rate limit:** Yes (password-reset class)
+
+**Request body:** `{ otp: string }` — 6 digits, numeric
+
+**Response:** `200` — `{ success, message, data: { user, token } }`  
+**Errors:** `400`, `401`
+
+---
+
+### POST /api/auth/change-email/resend
+
+Resend the confirmation OTP to the current **pending** new email.
+
+**Auth:** Yes  
+**Rate limit:** Yes (password-reset class)
+
+**Request body:** `{}` (empty JSON object)
+
+**Response:** `200` — `{ success, message }`  
 **Errors:** `400`, `401`
 
 ---
@@ -192,14 +256,71 @@ Validate JWT. Returns minimal user if valid.
 
 **Auth:** Yes
 
-**Response:** `200` — `{ success, message, user: { id, email, subscriptionTier } }`  
+**Response:** `200` — `{ success, message, user: { id, email, subscriptionTier, emailVerified, pendingEmail } }`  
 **Errors:** `401`
+
+---
+
+## Onboarding
+
+Base path: `/api/onboarding`. **Auth:** Bearer token required; **email must be verified** (`emailVerified: true`).
+
+Three-step flow (optional voice between primary and complete):
+
+1. **Primary** — resume **or** manual profile (same rules as profile manual-entry; `fullName` required for manual).
+2. **Voice** (optional) — audio intro; Whisper transcript + structured extraction **merges** into profile without wiping resume/manual data; stores `introductionTranscript` in `aiAttributes`.
+3. **Complete** — validates primary is satisfied, writes `personalizationContext` into `aiAttributes`, sets `User.onboardingCompletedAt`.
+
+Allowed only while `onboardingCompletedAt` is null (`409` if already completed).
+
+---
+
+### POST /api/onboarding/primary
+
+**Content-Type:** `multipart/form-data` **or** `application/json`
+
+- **Exactly one** of:
+  - `resume` file (PDF, DOC, DOCX), **or**
+  - Manual profile: JSON body with profile fields (same as `PUT /api/profile`), **or** multipart fields `manualProfile` / `profile` (JSON string).
+
+Does **not** set `onboardingCompletedAt`.
+
+**Response:** `200` — `{ success, data: profile, message }`  
+**Errors:** `400`, `401`, `403`, `409`
+
+---
+
+### POST /api/onboarding/voice
+
+Optional step. **Content-Type:** `multipart/form-data`
+
+**Alias:** `POST /api/onboarding/primary/voice` — same request/response as below (for clients that nest the voice step under primary).
+
+- One audio file; form field name **`audio`** (preferred), or **`voice`**, or **`file`** (only one file; same allowed types as session uploads).
+
+Transcribes via Whisper, runs resume-style structured extraction on the transcript only (no session scoring/insights), merges into profile non-destructively, stores transcript under `aiAttributes.introductionTranscript`.
+
+**Response:** `200` — `{ success, data: profile, message }`  
+**Errors:** `400`, `401`, `403`, `409`
+
+---
+
+### POST /api/onboarding/complete
+
+No file upload. Requires primary already satisfied (`resumeS3Key` on profile **or** `fullName` set). Voice step may be skipped.
+
+Sets `aiAttributes.personalizationContext` and `User.onboardingCompletedAt`.
+
+**Response:** `200` — `{ success, data: profile, message }`  
+**Errors:** `400`, `401`, `403`, `409`
+
+**Note:** Older clients may still use `POST /api/profile/manual-entry` and `POST /api/profile/resume` for ongoing edits; onboarding is the recommended path for first-time setup.
 
 ---
 
 ## Profile
 
-All profile routes require authentication and profile data isolation. Base path: `/api/profile`.
+All profile routes require **verified email** and authentication. Base path: `/api/profile`.
 
 ### GET /api/profile
 
@@ -296,26 +417,26 @@ Audio session routes. Base path: `/api/sessions`. All except `POST /start` enfor
 
 ### POST /api/sessions/start
 
-Start a new audio session. Uses usage limits (subscription tier).
+Start a new **interview** audio session. **Free:** max **3** interview starts per calendar month (counted by `audio_sessions` with `sessionType=interview` in the current month), independent of practice `usage_tracking`. **Paid:** unlimited.
 
 **Auth:** Yes  
 **Rate limit:** AI processing
 
 **Response:** `201` — `{ success, data: { sessionId, status, createdAt } }`  
-**Errors:** `400`, `404` (USER_NOT_FOUND), `429` (USAGE_LIMIT_EXCEEDED), `500`
+**Errors:** `400`, `404` (USER_NOT_FOUND), `429` (INTERVIEW_SESSION_LIMIT_EXCEEDED), `500`
 
 ---
 
 ### POST /api/sessions/:id/audio
 
-Upload audio for a session. Multipart: field `audio`. Audio types accepted (e.g. audio/mpeg, audio/wav). File size limit from config (e.g. 50MB).
+Upload audio for a session. Multipart: field `audio`. Audio types accepted (e.g. audio/mpeg, audio/wav). File size limit from config; **duration** caps: **30 minutes** (free), **60 minutes** (paid).
 
 **Auth:** Yes  
 **Rate limit:** Upload  
 **Params:** `id` — session CUID
 
 **Response:** `200` — `{ success, message: "Audio uploaded successfully. Processing started.", data }`  
-**Errors:** `400` (MISSING_AUDIO_FILE), `403` (SESSION_ACCESS_DENIED), `404` (SESSION_NOT_FOUND), `500`
+**Errors:** `400` (MISSING_AUDIO_FILE, INTERVIEW_AUDIO_LENGTH_LIMIT_EXCEEDED, AUDIO_DURATION_UNKNOWN), `403` (SESSION_ACCESS_DENIED), `404` (SESSION_NOT_FOUND), `500`
 
 ---
 
@@ -347,11 +468,11 @@ Update session display name (event label).
 
 ### GET /api/sessions/:id
 
-Get session details.
+Get session details. Interview sessions include `sessionType` and `limits` (tier, max interview audio seconds, monthly interview session cap / used / remaining).
 
 **Params:** `id` — session CUID
 
-**Response:** `200` — `{ success, data: { id, displayName, status, transcript, aiAnalysis, scores, analysisComplete, processingError, createdAt, updatedAt } }`  
+**Response:** `200` — `{ success, data: { id, sessionType?, limits?, displayName, status, transcript, aiAnalysis, scores, analysisComplete, processingError, createdAt, updatedAt } }`  
 **Errors:** `403`, `404`, `500`
 
 ---
@@ -574,6 +695,7 @@ Responses: `429` with `error.code: "RATE_LIMIT_EXCEEDED"`, optional `retryAfter`
 |--------------------------|--------|--------------------------------|
 | VALIDATION_ERROR         | 400    | Request validation failed      |
 | AUTHENTICATION_ERROR     | 401    | Invalid or missing token       |
+| EMAIL_NOT_VERIFIED       | 403    | Email not verified (local login) |
 | SESSION_ACCESS_DENIED    | 403    | Session not owned by user      |
 | SESSION_NOT_FOUND        | 404    | Session not found              |
 | USER_NOT_FOUND           | 404    | User not found                 |
