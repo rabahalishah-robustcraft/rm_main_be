@@ -1,4 +1,4 @@
-# AI Audio Summarization Backend
+# Recruit Me AI Backend
 
 TypeScript/Express backend for the AI-powered interview practice platform (audio sessions, profiles, subscriptions). See [Architecture](docs/ARCHITECTURE.md) and [API Documentation](docs/API_DOCUMENTATION.md) for details.
 
