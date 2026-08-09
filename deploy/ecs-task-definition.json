@@ -1,0 +1,113 @@
+{
+  "family": "rm-main-be",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::080538261697:role/rm-main-be-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::080538261697:role/rm-main-be-ecs-task-role",
+  "volumes": [
+    {
+      "name": "postgres-data",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-0f0d7a490a2b44d15",
+        "transitEncryption": "ENABLED"
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "postgres",
+      "image": "postgres:16-alpine",
+      "essential": true,
+      "environment": [
+        { "name": "POSTGRES_USER", "value": "app" },
+        { "name": "POSTGRES_DB", "value": "app" }
+      ],
+      "secrets": [
+        {
+          "name": "POSTGRES_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:POSTGRES_PASSWORD::"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "postgres-data",
+          "containerPath": "/var/lib/postgresql/data",
+          "readOnly": false
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "pg_isready -U app -d app -h 127.0.0.1 || exit 1"],
+        "interval": 10,
+        "timeout": 5,
+        "retries": 10,
+        "startPeriod": 120
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/rm-main-be",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "postgres",
+          "awslogs-create-group": "true"
+        }
+      }
+    },
+    {
+      "name": "api",
+      "image": "080538261697.dkr.ecr.us-east-1.amazonaws.com/rm-main-be:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 3000, "protocol": "tcp" }
+      ],
+      "dependsOn": [
+        { "containerName": "postgres", "condition": "HEALTHY" }
+      ],
+      "secrets": [
+        { "name": "NODE_ENV", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:NODE_ENV::" },
+        { "name": "PORT", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:PORT::" },
+        { "name": "CORS_ORIGIN", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:CORS_ORIGIN::" },
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:DATABASE_URL::" },
+        { "name": "JWT_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:JWT_SECRET::" },
+        { "name": "JWT_EXPIRES_IN", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:JWT_EXPIRES_IN::" },
+        { "name": "AWS_ACCESS_KEY_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:AWS_ACCESS_KEY_ID::" },
+        { "name": "AWS_SECRET_ACCESS_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:AWS_SECRET_ACCESS_KEY::" },
+        { "name": "AWS_REGION", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:AWS_REGION::" },
+        { "name": "AWS_S3_BUCKET", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:AWS_S3_BUCKET::" },
+        { "name": "OPENAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:OPENAI_API_KEY::" },
+        { "name": "WHISPER_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:WHISPER_API_KEY::" },
+        { "name": "OPENAI_MODEL", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:OPENAI_MODEL::" },
+        { "name": "ASSEMBLYAI_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:ASSEMBLYAI_API_KEY::" },
+        { "name": "ASSEMBLYAI_WEBHOOK_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:ASSEMBLYAI_WEBHOOK_SECRET::" },
+        { "name": "ASSEMBLYAI_SPEECH_MODELS", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:ASSEMBLYAI_SPEECH_MODELS::" },
+        { "name": "COACHING_MODEL", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:COACHING_MODEL::" },
+        { "name": "WEBHOOK_BASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:WEBHOOK_BASE_URL::" },
+        { "name": "BCRYPT_SALT_ROUNDS", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:BCRYPT_SALT_ROUNDS::" },
+        { "name": "GOOGLE_CLIENT_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:GOOGLE_CLIENT_ID::" },
+        { "name": "GOOGLE_CLIENT_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:GOOGLE_CLIENT_SECRET::" },
+        { "name": "RESEND_API_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:RESEND_API_KEY::" },
+        { "name": "EMAIL_FROM_ADDRESS", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:EMAIL_FROM_ADDRESS::" },
+        { "name": "EMAIL_FROM_NAME", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:EMAIL_FROM_NAME::" },
+        { "name": "DISABLE_S3_HEALTH_CHECK", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:DISABLE_S3_HEALTH_CHECK::" },
+        { "name": "STRIPE_SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:STRIPE_SECRET_KEY::" },
+        { "name": "STRIPE_PRICE_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:STRIPE_PRICE_ID::" },
+        { "name": "STRIPE_WEBHOOK_SECRET", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:STRIPE_WEBHOOK_SECRET::" },
+        { "name": "STRIPE_BILLING_PORTAL_CONFIGURATION_ID", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:STRIPE_BILLING_PORTAL_CONFIGURATION_ID::" },
+        { "name": "STRIPE_CHECKOUT_SUCCESS_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:STRIPE_CHECKOUT_SUCCESS_URL::" },
+        { "name": "STRIPE_CHECKOUT_CANCEL_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:STRIPE_CHECKOUT_CANCEL_URL::" },
+        { "name": "STRIPE_BILLING_PORTAL_RETURN_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:STRIPE_BILLING_PORTAL_RETURN_URL::" },
+        { "name": "STRIPE_PUBLIC_APP_BASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:080538261697:secret:rm-main-be/beta/env-zlnZFi:STRIPE_PUBLIC_APP_BASE_URL::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/rm-main-be",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "api",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}
