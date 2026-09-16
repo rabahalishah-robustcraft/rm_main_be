@@ -22,14 +22,15 @@ export interface CoachingReport {
 const openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
 
 /**
- * Default coaching model: GPT-5.3 Chat (Chat Completions id per OpenAI docs).
- * 128k context, large max output — override with COACHING_MODEL in .env if needed.
- * @see https://developers.openai.com/api/docs/models/gpt-5.3-chat-latest
+ * Default coaching model: GPT-5.6 Sol (replacement for retired gpt-5.3-chat-latest).
+ * Override with COACHING_MODEL in .env if needed.
+ * @see https://developers.openai.com/api/docs/models/gpt-5.6-sol
+ * @see https://developers.openai.com/api/docs/deprecations
  */
-export const DEFAULT_COACHING_MODEL = 'gpt-5.3-chat-latest';
+export const DEFAULT_COACHING_MODEL = 'gpt-5.6-sol';
 
 /**
- * Some models only allow the default temperature (e.g. GPT-5.3 Chat: not 0.3).
+ * Some models only allow the default temperature (e.g. GPT-5.x: not 0.3).
  * Omit `temperature` in those cases so the API uses its default.
  */
 export function modelSupportsCustomTemperature(model: string): boolean {
@@ -58,7 +59,7 @@ export async function generateAIReport(markdownTranscript: string): Promise<Coac
       }
     ],
     ...(modelSupportsCustomTemperature(model) ? { temperature: 0.3 } : {}),
-    // GPT-5.3+ rejects `max_tokens`; use max_completion_tokens (OpenAI SDK / API).
+    // GPT-5.x rejects `max_tokens`; use max_completion_tokens (OpenAI SDK / API).
     max_completion_tokens: 8192,
     response_format: { type: 'json_object' }
   });

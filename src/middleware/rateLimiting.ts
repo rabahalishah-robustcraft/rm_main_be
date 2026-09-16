@@ -4,6 +4,8 @@ import { config } from '../utils/config';
 interface RateLimitConfig {
   windowMs: number;
   maxRequests: number;
+  /** Isolates this limiter's counters from other limiters in the shared store */
+  keyPrefix: string;
   message?: string;
   skipSuccessfulRequests?: boolean;
   skipFailedRequests?: boolean;
@@ -55,7 +57,9 @@ if (process.env.NODE_ENV !== 'test' && !process.env.JEST_WORKER_ID) {
 }
 
 /**
- * Generic rate limiting middleware
+ * Generic rate limiting middleware.
+ * Each limiter must use a unique keyPrefix so counters are not shared across
+ * api / auth / password-reset / upload / AI limiters (same IP or user).
  */
 export const createRateLimit = (config: RateLimitConfig) => {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -64,7 +68,7 @@ export const createRateLimit = (config: RateLimitConfig) => {
       return;
     }
 
-    const clientId = getClientIdentifier(req);
+    const clientId = `${config.keyPrefix}:${getClientIdentifier(req)}`;
     const now = Date.now();
 
     let clientData = store.get(clientId);
@@ -135,6 +139,7 @@ function getClientIdentifier(req: Request): string {
  * Uses config values: AUTH_RATE_LIMIT_WINDOW_MS and AUTH_RATE_LIMIT_MAX_ATTEMPTS
  */
 export const authRateLimit = createRateLimit({
+  keyPrefix: 'auth',
   windowMs: config.AUTH_RATE_LIMIT_WINDOW_MS, // Default: 15 minutes (900000ms)
   maxRequests: config.AUTH_RATE_LIMIT_MAX_ATTEMPTS, // Default: 10 attempts per window
   message: 'Too many authentication attempts. Please try again later.'
@@ -144,6 +149,7 @@ export const authRateLimit = createRateLimit({
  * Stricter rate limiting for password reset (forgot-password, verify-otp)
  */
 export const passwordResetRateLimit = createRateLimit({
+  keyPrefix: 'password-reset',
   windowMs: 60 * 60 * 1000, // 1 hour
   maxRequests: 3, // 3 attempts per hour per IP
   message: 'Too many password reset attempts. Please try again later.'
@@ -153,6 +159,7 @@ export const passwordResetRateLimit = createRateLimit({
  * General API rate limiting
  */
 export const apiRateLimit = createRateLimit({
+  keyPrefix: 'api',
   windowMs: 60 * 1000, // 1 minute
   maxRequests: 100, // 100 requests per minute
   message: 'Too many API requests. Please slow down.'
@@ -174,6 +181,7 @@ export const apiRateLimitExcludingWebhooks = (req: Request, res: Response, next:
  * Strict rate limiting for file uploads
  */
 export const uploadRateLimit = createRateLimit({
+  keyPrefix: 'upload',
   windowMs: 60 * 60 * 1000, // 1 hour
   maxRequests: 10, // 10 uploads per hour
   message: 'Too many file uploads. Please try again later.'
@@ -183,6 +191,7 @@ export const uploadRateLimit = createRateLimit({
  * Rate limiting for AI processing endpoints
  */
 export const aiProcessingRateLimit = createRateLimit({
+  keyPrefix: 'ai',
   windowMs: 60 * 60 * 1000, // 1 hour
   maxRequests: 50, // 50 AI requests per hour
   message: 'Too many AI processing requests. Please try again later.'
@@ -253,7 +262,7 @@ export class RedisRateLimit {
   createRateLimit(config: RateLimitConfig) {
     return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       const clientId = getClientIdentifier(req);
-      const key = `rate_limit:${clientId}`;
+      const key = `rate_limit:${config.keyPrefix}:${clientId}`;
       const now = Date.now();
 
       try {
